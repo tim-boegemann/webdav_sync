@@ -1,17 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:file_picker/file_picker.dart';
 import '../models/sync_config.dart';
 import '../providers/sync_provider.dart';
-import 'sync_screen.dart';
+import '../services/path_provider_service.dart';
 
 class ConfigScreen extends StatefulWidget {
-  const ConfigScreen({super.key});
+  final SyncConfig? configToEdit;
+
+  const ConfigScreen({super.key, this.configToEdit});
 
   @override
   State<ConfigScreen> createState() => _ConfigScreenState();
 }
 
 class _ConfigScreenState extends State<ConfigScreen> {
+  late TextEditingController _configNameController;
   late TextEditingController _webdavUrlController;
   late TextEditingController _usernameController;
   late TextEditingController _passwordController;
@@ -24,11 +28,15 @@ class _ConfigScreenState extends State<ConfigScreen> {
   String? _lastError;
   bool _showResourceList = false;
   bool _isLoadingFolders = false;
+  bool _isNewConfig = false;
 
   @override
   void initState() {
     super.initState();
-    final config = context.read<SyncProvider>().config;
+    final config = widget.configToEdit;
+    _isNewConfig = config == null;
+
+    _configNameController = TextEditingController(text: config?.name ?? '');
     _webdavUrlController = TextEditingController(text: config?.webdavUrl ?? '');
     _usernameController = TextEditingController(text: config?.username ?? '');
     _passwordController = TextEditingController(text: config?.password ?? '');
@@ -38,10 +46,16 @@ class _ConfigScreenState extends State<ConfigScreen> {
     _syncIntervalController =
         TextEditingController(text: (config?.syncIntervalMinutes ?? 15).toString());
     _autoSync = config?.autoSync ?? false;
+    
+    // Initialisiere Default-Pfad wenn leer
+    if (_localFolderController.text.isEmpty) {
+      _initializeDefaultLocalPath();
+    }
   }
 
   @override
   void dispose() {
+    _configNameController.dispose();
     _webdavUrlController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
@@ -53,7 +67,14 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
   void _saveConfig() {
     try {
+      if (_configNameController.text.isEmpty) {
+        setState(() => _lastError = 'Bitte gib einen Namen für das Profil ein');
+        return;
+      }
+
       final config = SyncConfig(
+        id: widget.configToEdit?.id,
+        name: _configNameController.text,
         webdavUrl: _webdavUrlController.text,
         username: _usernameController.text,
         password: _passwordController.text,
@@ -68,8 +89,14 @@ class _ConfigScreenState extends State<ConfigScreen> {
       setState(() => _lastError = null);
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Configuration saved!')),
+        SnackBar(
+          content: Text(_isNewConfig ? 'Profil erstellt!' : 'Profil aktualisiert!'),
+          backgroundColor: const Color(0xFF2563EB),
+        ),
       );
+
+      // Navigiere zurück zur ConfigList
+      Navigator.of(context).pop();
     } catch (e) {
       _handleException(e, 'Error saving configuration');
     }
@@ -80,6 +107,10 @@ class _ConfigScreenState extends State<ConfigScreen> {
       setState(() => _isTesting = true);
 
       final config = SyncConfig(
+        id: widget.configToEdit?.id,
+        name: _configNameController.text.isEmpty 
+            ? 'Temp Config' 
+            : _configNameController.text,
         webdavUrl: _webdavUrlController.text,
         username: _usernameController.text,
         password: _passwordController.text,
@@ -116,7 +147,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Keine Ressourcen gefunden - Ordner ist leer oder Pfad ungültig'),
-              backgroundColor: Colors.orange,
+              backgroundColor: Color(0xFFF59E0B),
             ),
           );
         } else {
@@ -126,7 +157,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('✓ ${provider.remoteResources.length} Ressourcen gefunden! Konfiguration gespeichert.'),
-              backgroundColor: Colors.green,
+              backgroundColor: const Color(0xFF2563EB),
               duration: const Duration(seconds: 4),
             ),
           );
@@ -224,11 +255,46 @@ class _ConfigScreenState extends State<ConfigScreen> {
     }
   }
 
+  Future<void> _showLocalFolderSelector() async {
+    try {
+      final selectedDirectory = await FilePicker.platform.getDirectoryPath();
+
+      if (selectedDirectory != null && mounted) {
+        setState(() {
+          _localFolderController.text = selectedDirectory;
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Ordner gewählt: $selectedDirectory'),
+            backgroundColor: const Color(0xFF2563EB),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      _handleException(e, 'Fehler beim Auswählen des lokalen Ordners');
+    }
+  }
+
+  Future<void> _initializeDefaultLocalPath() async {
+    try {
+      final defaultPath = await PathProviderService.getDefaultLocalPath();
+      if (_localFolderController.text.isEmpty) {
+        setState(() {
+          _localFolderController.text = defaultPath;
+        });
+      }
+    } catch (e) {
+      // Fehler beim Initialisieren ignorieren, Benutzer kann manuell wählen
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('WebDAV Configuration'),
+        title: Text(_isNewConfig ? 'Neues Profil' : 'Profil bearbeiten'),
         elevation: 0,
       ),
       body: SingleChildScrollView(
@@ -267,6 +333,35 @@ class _ConfigScreenState extends State<ConfigScreen> {
                 ),
               ),
             if (_lastError != null) const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Profilname',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _configNameController,
+                      decoration: InputDecoration(
+                        labelText: 'Name des Profils',
+                        hintText: 'z.B. "Mein Zuhause", "Büro"',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -364,11 +459,17 @@ class _ConfigScreenState extends State<ConfigScreen> {
                     const SizedBox(height: 12),
                     TextField(
                       controller: _localFolderController,
+                      readOnly: true,
                       decoration: InputDecoration(
                         labelText: 'Local Folder Path',
                         hintText: '/storage/emulated/0/WebDAVSync',
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
+                        ),
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.folder_open),
+                          onPressed: _showLocalFolderSelector,
+                          tooltip: 'Wähle lokalen Ordner',
                         ),
                       ),
                     ),
@@ -502,18 +603,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
               label: const Text('Save Configuration'),
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 12),
-                backgroundColor: Colors.green,
               ),
-            ),
-            const SizedBox(height: 12),
-            OutlinedButton.icon(
-              onPressed: () {
-                Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(builder: (_) => const SyncScreen()),
-                );
-              },
-              icon: const Icon(Icons.sync),
-              label: const Text('Go to Sync'),
             ),
           ],
         ),

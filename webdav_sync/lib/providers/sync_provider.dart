@@ -3,6 +3,7 @@ import '../models/sync_config.dart';
 import '../models/sync_status.dart';
 import '../services/webdav_sync_service.dart';
 import '../services/config_service.dart';
+import '../services/path_provider_service.dart';
 
 class SyncProvider extends ChangeNotifier {
   final WebdavSyncService _syncService = WebdavSyncService();
@@ -10,6 +11,7 @@ class SyncProvider extends ChangeNotifier {
 
   SyncStatus? _syncStatus;
   SyncConfig? _config;
+  List<SyncConfig> _allConfigs = [];
   bool _isLoading = false;
   String? _validationError;
   List<Map<String, dynamic>> _remoteResources = [];
@@ -18,6 +20,7 @@ class SyncProvider extends ChangeNotifier {
 
   SyncStatus? get syncStatus => _syncStatus;
   SyncConfig? get config => _config;
+  List<SyncConfig> get allConfigs => _allConfigs;
   bool get isLoading => _isLoading;
   String? get validationError => _validationError;
   List<Map<String, dynamic>> get remoteResources => _remoteResources;
@@ -26,11 +29,24 @@ class SyncProvider extends ChangeNotifier {
   int get totalSyncFiles => _totalSyncFiles;
 
   SyncProvider() {
-    _loadConfig();
+    _loadConfigs();
   }
 
-  Future<void> _loadConfig() async {
-    _config = await _configService.loadConfig();
+  Future<void> _loadConfigs() async {
+    _allConfigs = await _configService.getAllConfigs();
+    
+    // Lade die letzte ausgewählte Config oder die erste
+    final selectedId = await _configService.getSelectedConfigId();
+    if (selectedId != null) {
+      _config = await _configService.loadConfig(selectedId);
+    }
+    
+    // Falls keine gültige Config, nutze die erste
+    if (_config == null && _allConfigs.isNotEmpty) {
+      _config = _allConfigs.first;
+      await _configService.setSelectedConfigId(_config!.id);
+    }
+    
     if (_config != null) {
       _syncService.initialize(_config!);
       _validationError = _syncService.validateConfig();
@@ -38,11 +54,42 @@ class SyncProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> setCurrentConfig(SyncConfig config) async {
+    _config = config;
+    await _configService.setSelectedConfigId(config.id);
+    _syncService.initialize(config);
+    _validationError = _syncService.validateConfig();
+    notifyListeners();
+  }
+
   Future<void> saveConfig(SyncConfig config) async {
     _config = config;
     await _configService.saveConfig(config);
+    
+    // Aktualisiere die Liste
+    _allConfigs = await _configService.getAllConfigs();
+    
     _syncService.initialize(config);
     _validationError = _syncService.validateConfig();
+    notifyListeners();
+  }
+
+  Future<void> deleteConfig(String id) async {
+    await _configService.deleteConfig(id);
+    _allConfigs = await _configService.getAllConfigs();
+    
+    // Wenn die gelöschte Config die aktuelle war, wähle eine andere
+    if (_config?.id == id) {
+      if (_allConfigs.isNotEmpty) {
+        _config = _allConfigs.first;
+        await _configService.setSelectedConfigId(_config!.id);
+        _syncService.initialize(_config!);
+      } else {
+        _config = null;
+      }
+      _validationError = _syncService.validateConfig();
+    }
+    
     notifyListeners();
   }
 
@@ -132,5 +179,13 @@ class SyncProvider extends ChangeNotifier {
       throw Exception(_validationError);
     }
     return await _syncService.getRemoteFolders();
+  }
+
+  Future<String> getDefaultLocalPath() async {
+    return await PathProviderService.getDefaultLocalPath();
+  }
+
+  String getPlatformName() {
+    return PathProviderService.getPlatformName();
   }
 }

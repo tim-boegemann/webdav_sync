@@ -55,6 +55,9 @@ dependencies:
   
   # Permission handling
   permission_handler: ^11.0.0
+  
+  # File picker for directory selection
+  file_picker: ^8.0.0
 
 dev_dependencies:
   flutter_test:
