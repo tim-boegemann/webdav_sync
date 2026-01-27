@@ -2,6 +2,10 @@
 
 Eine Flutter-App zum regelmäßigen Synchronisieren eines Ordners von einem WebDAV-Server auf das lokale Gerät.
 
+## Disclaimer
+
+Diese App wurde und wird vollständig gevibecoded, damit ich sehen kann wie weit man den Spaß für mich produktiv treiben kann.
+
 ## Features
 
 - ✅ WebDAV-Verbindung konfigurieren (Server, Benutzername, Passwort)
