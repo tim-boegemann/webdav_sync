@@ -51,7 +51,7 @@ class SyncScreen extends StatelessWidget {
                   const SizedBox(height: 24),
                   ElevatedButton.icon(
                     onPressed: () {
-                      Navigator.of(context).pushReplacement(
+                      Navigator.of(context).push(
                         MaterialPageRoute(
                             builder: (_) => const ConfigScreen()),
                       );
@@ -268,7 +268,7 @@ class SyncScreen extends StatelessWidget {
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
                   onPressed: () {
-                    Navigator.of(context).pushReplacement(
+                    Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => ConfigScreen(configToEdit: syncProvider.config),
                       ),
