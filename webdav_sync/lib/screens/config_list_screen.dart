@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/sync_config.dart';
 import '../providers/sync_provider.dart';
+import '../theme/app_colors.dart';
 import 'config_screen.dart';
 import 'sync_screen.dart';
 
@@ -67,7 +68,7 @@ class _ConfigListScreenState extends State<ConfigListScreen> {
                   borderRadius: BorderRadius.circular(12),
                   side: isSelected
                       ? const BorderSide(
-                          color: Color(0xFF2563EB),
+                          color: AppColors.primaryButtonBackground,
                           width: 2,
                         )
                       : BorderSide.none,
@@ -79,7 +80,7 @@ class _ConfigListScreenState extends State<ConfigListScreen> {
                   ),
                   leading: Icon(
                     Icons.cloud_sync,
-                    color: isSelected ? const Color(0xFF2563EB) : Colors.grey,
+                    color: isSelected ? AppColors.primaryButtonBackground : Colors.grey,
                     size: 28,
                   ),
                   title: Text(
@@ -161,6 +162,8 @@ class _ConfigListScreenState extends State<ConfigListScreen> {
         },
       ),
       floatingActionButton: FloatingActionButton(
+        backgroundColor: AppColors.primaryButtonBackground,
+        foregroundColor: AppColors.primaryButtonForeground,
         onPressed: () {
           Navigator.of(context).push(
             MaterialPageRoute(

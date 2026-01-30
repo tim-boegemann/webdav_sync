@@ -1,6 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import '../models/sync_config.dart';
+import '../models/sync_status.dart';
 
 class ConfigService {
   static const String _configsKey = 'sync_configs_list';
@@ -59,6 +60,15 @@ class ConfigService {
       final jsonList = jsonEncode(configs.map((c) => c.toMap()).toList());
       await prefs.setString(_configsKey, jsonList);
     }
+    
+    // Lösche auch den gespeicherten SyncStatus für diese Config
+    await deleteSyncStatus(id);
+  }
+
+  /// Löscht den gespeicherten SyncStatus einer Konfiguration
+  Future<void> deleteSyncStatus(String configId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('sync_status_$configId');
   }
 
   /// Setzt die aktuell ausgewählte Konfiguration
@@ -81,5 +91,43 @@ class ConfigService {
   Future<void> setLastSyncTime(String time) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('last_sync_time', time);
+  }
+
+  /// Speichert den kompletten SyncStatus persistent (pro Config)
+  Future<void> saveSyncStatus(SyncStatus status, String configId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final statusMap = {
+      'issyncing': status.issyncing,
+      'lastSyncTime': status.lastSyncTime,
+      'filesSync': status.filesSync,
+      'filesSkipped': status.filesSkipped,
+      'status': status.status,
+      'error': status.error,
+    };
+    // Speichere pro Config mit eindeutigem Key
+    await prefs.setString('sync_status_$configId', jsonEncode(statusMap));
+  }
+
+  /// Lädt den SyncStatus für eine bestimmte Config
+  Future<SyncStatus?> getLastSyncStatus(String configId) async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonString = prefs.getString('sync_status_$configId');
+    
+    if (jsonString != null && jsonString.isNotEmpty) {
+      try {
+        final map = jsonDecode(jsonString) as Map<String, dynamic>;
+        return SyncStatus(
+          issyncing: map['issyncing'] as bool? ?? false,
+          lastSyncTime: map['lastSyncTime'] as String? ?? '',
+          filesSync: map['filesSync'] as int? ?? 0,
+          filesSkipped: map['filesSkipped'] as int? ?? 0,
+          status: map['status'] as String? ?? '',
+          error: map['error'] as String?,
+        );
+      } catch (e) {
+        return null;
+      }
+    }
+    return null;
   }
 }

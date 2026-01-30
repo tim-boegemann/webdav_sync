@@ -1,16 +1,20 @@
 import 'dart:io';
 import 'dart:convert' as convert;
 import 'dart:math';
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:xml/xml.dart';
 import 'package:path/path.dart' as path;
 import '../models/sync_config.dart';
 import '../models/sync_status.dart';
+import '../models/file_hash_database.dart';
 
 class WebdavSyncService {
   late http.Client _httpClient;
   SyncConfig? _config;
+  late FileHashDatabase _hashDatabase;
+  bool _isCancelled = false;
   static const int _connectionTimeoutSeconds = 10;
   static const int _responseTimeoutSeconds = 30;
 
@@ -20,6 +24,21 @@ class WebdavSyncService {
   void initialize(SyncConfig config) {
     _config = config;
     _httpClient = _createHttpClient();
+    
+    // Initialisiere Hash-Datenbank
+    final hashDbPath = path.join(
+      path.dirname(config.localFolder),
+      '.sync_hashes_${config.id}.json',
+    );
+    _hashDatabase = FileHashDatabase(
+      configId: config.id,
+      hashDatabasePath: hashDbPath,
+    );
+  }
+
+  /// Initialisiert die Hash-Datenbank (sollte beim Start aufgerufen werden)
+  Future<void> initializeHashDatabase() async {
+    await _hashDatabase.initialize();
   }
 
   /// Erstellt einen HttpClient mit Zertifikatsverfizierung für Self-Signed Certs
@@ -36,6 +55,29 @@ class WebdavSyncService {
     httpClient.connectionTimeout = Duration(seconds: _connectionTimeoutSeconds);
     
     return IOClient(httpClient);
+  }
+
+  /// Validiert die WebDAV-Anmeldedaten (nur für getRemoteFolders())
+  String? validateWebDAVCredentials() {
+    if (_config == null) return 'Konfiguration nicht geladen';
+    
+    if (_config!.webdavUrl.isEmpty) return 'WebDAV-URL ist leer';
+    if (_config!.username.isEmpty) return 'Benutzername ist leer';
+    if (_config!.password.isEmpty) return 'Passwort ist leer';
+    
+    // URL-Format überprüfen
+    try {
+      Uri.parse(_config!.webdavUrl);
+    } catch (e) {
+      return 'Ungültige WebDAV-URL Format';
+    }
+    
+    // Überprüfe ob URL mit http(s):// beginnt
+    if (!_config!.webdavUrl.startsWith('http://') && !_config!.webdavUrl.startsWith('https://')) {
+      return 'WebDAV-URL muss mit http:// oder https:// beginnen';
+    }
+    
+    return null;
   }
 
   /// Validiert die WebDAV-Konfiguration
@@ -66,7 +108,18 @@ class WebdavSyncService {
   // Callback für Progress-Updates während Sync
   Function(int current, int total)? onProgressUpdate;
 
+  /// Breche den aktuellen Sync ab
+  void cancelSync() {
+    _isCancelled = true;
+  }
+
+  /// Setze Sync-Cancel zurück (vor jedem neuen Sync)
+  void _resetCancel() {
+    _isCancelled = false;
+  }
+
   Future<SyncStatus> performSync() async {
+    _resetCancel();
     // Validiere Config zuerst
     final validationError = validateConfig();
     if (validationError != null) {
@@ -74,6 +127,7 @@ class WebdavSyncService {
         issyncing: false,
         lastSyncTime: DateTime.now().toString(),
         filesSync: 0,
+        filesSkipped: 0,
         status: 'Fehler: Konfiguration ungültig',
         error: validationError,
       );
@@ -81,7 +135,8 @@ class WebdavSyncService {
 
     try {
       final DateTime startTime = DateTime.now();
-      int filesSync = 0;
+      int filesDownloaded = 0;
+      int filesSkipped = 0;
 
       // Create local folder if it doesn't exist
       final localDir = Directory(_config!.localFolder);
@@ -93,49 +148,106 @@ class WebdavSyncService {
       final files = await _listRemoteFilesRecursive(_config!.remoteFolder);
       final totalFiles = files.length;
       
+      print('📊 SYNC PROGRESS: Total files to sync: $totalFiles');
+      
+      // Extrahiere den Namen des Remote-Ordners um ihn lokal zu erstellen
+      // z.B. wenn remoteFolder = "/remote/path/Documents" dann folderName = "Documents"
+      final remoteUri = Uri.parse(_config!.remoteFolder);
+      final remoteFolderName = remoteUri.pathSegments
+          .where((s) => s.isNotEmpty)
+          .toList()
+          .last;
+      
+      print('📂 Remote folder name: $remoteFolderName');
+      
       // Informiere über Gesamtzahl
       onProgressUpdate?.call(0, totalFiles);
+      print('✓ Called onProgressUpdate(0, $totalFiles)');
 
       for (var file in files) {
+        // Überprüfe ob Sync abgebrochen wurde
+        if (_isCancelled) {
+          print('Sync wurde vom Benutzer abgebrochen');
+          final duration = DateTime.now().difference(startTime);
+          return SyncStatus(
+            issyncing: false,
+            lastSyncTime: DateTime.now().toString(),
+            filesSync: filesDownloaded,
+            filesSkipped: filesSkipped,
+            status: 'Sync abgebrochen nach ${duration.inSeconds}s ($filesDownloaded heruntergeladen, $filesSkipped übersprungen)',
+          );
+        }
+
         final relativePath = _getRelativePath(file, _config!.remoteFolder);
-        final localPath = path.join(_config!.localFolder, relativePath);
+        // Füge den Ordnernamen hinzu damit die Struktur erhalten bleibt
+        final localPath = path.join(_config!.localFolder, remoteFolderName, relativePath);
 
         try {
           // Create local subdirectories if needed
           final localFileDir = path.dirname(localPath);
           final dir = Directory(localFileDir);
           if (!dir.existsSync()) {
+            print('📁 Erstelle Ordner: $localFileDir');
             dir.createSync(recursive: true);
           }
 
-          // Download file
-          await _downloadFile(file, localPath);
-          filesSync++;
+          // Berechne Remote-Datei Hash
+          final remoteHash = await _calculateRemoteFileHash(file);
+          
+          // Überprüfe ob die Datei bereits heruntergeladen wurde und den gleichen Hash hat
+          final oldHash = _hashDatabase.getHash(relativePath);
+          final localFile = File(localPath);
+          final localFileExists = localFile.existsSync();
+          
+          if (oldHash != null && oldHash == remoteHash && localFileExists) {
+            // Datei hat nicht geändert und existiert lokal - überspringe Download
+            print('✓ Übersprungen (unverändert): $relativePath');
+            filesSkipped++;
+          } else {
+            // Datei ist neu, hat sich geändert, oder lokale Datei wurde gelöscht - lade herunter
+            if (oldHash != null && oldHash == remoteHash && !localFileExists) {
+              print('↓ Lade erneut herunter (lokale Datei fehlend): $relativePath');
+            } else if (oldHash != null) {
+              print('⟳ Aktualisiere (Hash geändert): $relativePath');
+            } else {
+              print('↓ Lade herunter: $relativePath');
+            }
+            
+            await _downloadFile(file, localPath);
+            
+            // Speichere neuen Hash
+            _hashDatabase.setHash(relativePath, remoteHash);
+            filesDownloaded++;
+          }
           
           // Update progress
-          onProgressUpdate?.call(filesSync, totalFiles);
+          onProgressUpdate?.call(filesDownloaded + filesSkipped, totalFiles);
         } catch (e) {
-          print('Fehler beim Download von $file: $e');
+          print('Fehler beim Synchronisieren von $file: $e');
           // Ignore individual file errors and continue
-          // Aber trotzdem Progress aktualisieren
-          filesSync++;
-          onProgressUpdate?.call(filesSync, totalFiles);
+          filesSkipped++;
+          onProgressUpdate?.call(filesDownloaded + filesSkipped, totalFiles);
         }
       }
+
+      // Speichere Hash-Datenbank
+      await _hashDatabase.save();
 
       final duration = DateTime.now().difference(startTime);
 
       return SyncStatus(
         issyncing: false,
         lastSyncTime: DateTime.now().toString(),
-        filesSync: filesSync,
-        status: 'Sync erfolgreich in ${duration.inSeconds}s ($filesSync/$totalFiles Dateien)',
+        filesSync: filesDownloaded,
+        filesSkipped: filesSkipped,
+        status: 'Sync erfolgreich in ${duration.inSeconds}s ($filesDownloaded heruntergeladen, $filesSkipped übersprungen)',
       );
     } catch (e) {
       return SyncStatus(
         issyncing: false,
         lastSyncTime: DateTime.now().toString(),
         filesSync: 0,
+        filesSkipped: 0,
         status: 'Sync fehlgeschlagen',
         error: e.toString(),
       );
@@ -150,17 +262,36 @@ class WebdavSyncService {
 
   /// Listet nur die Ordner auf der obersten Ebene auf
   Future<List<Map<String, dynamic>>> getRemoteFolders() async {
+    return getRemoteFoldersAtPath(_config!.webdavUrl);
+  }
+
+  /// Listet Ordner auf einem bestimmten Pfad auf (für Navigation in Sub-Ordner)
+  Future<List<Map<String, dynamic>>> getRemoteFoldersAtPath(String folderPath) async {
     try {
-      // Nutze die WebDAV-URL direkt (keine zusätzliche Pfad-Verarbeitung)
-      final baseUrl = _config!.webdavUrl.replaceAll(RegExp(r'/$'), '');
+      // Wenn folderPath nur ein relativer Pfad ist, kombiniere mit WebDAV-URL Host
+      String baseUrl;
+      if (folderPath.startsWith('http')) {
+        // Es ist eine komplette URL
+        baseUrl = folderPath.replaceAll(RegExp(r'/$'), '');
+      } else {
+        // Es ist ein relativer Pfad - kombiniere mit WebDAV-URL Base
+        final webdavUri = Uri.parse(_config!.webdavUrl);
+        baseUrl = '${webdavUri.scheme}://${webdavUri.host}${webdavUri.port != 80 && webdavUri.port != 443 ? ':${webdavUri.port}' : ''}$folderPath';
+        baseUrl = baseUrl.replaceAll(RegExp(r'/$'), '');
+      }
+      
       final auth = _buildAuthHeader();
 
-      print('Lade Ordner von: $baseUrl');
+      print('==== REMOTE FOLDER LISTING AT $baseUrl ====');
+      print('Base URL: $baseUrl');
+      print('Auth Header: ${auth.substring(0, 20)}...');
 
       final request = http.Request('PROPFIND', Uri.parse(baseUrl))
         ..headers['Authorization'] = auth
         ..headers['Depth'] = '1'
         ..headers['Content-Type'] = 'application/xml';
+
+      print('Sending PROPFIND request with Depth: 1');
 
       final streamedResponse = await _httpClient
           .send(request)
@@ -171,126 +302,152 @@ class WebdavSyncService {
 
       final response = await http.Response.fromStream(streamedResponse);
 
-      print('PROPFIND Response: ${response.statusCode}');
+      print('Response Status Code: ${response.statusCode}');
+      print('Response Headers: ${response.headers}');
+      print('Response Body Length: ${response.body.length} bytes');
 
       if (response.statusCode == 207) {
         final body = response.body;
-        print('===== PROPFIND Response Body (erste 500 Zeichen) =====');
-        print(body.substring(0, body.length > 500 ? 500 : body.length));
-        print('===== Ende Response Body =====');
+        print('===== FULL RESPONSE BODY =====');
+        print(body);
+        print('===== END RESPONSE BODY =====');
         
-        final document = XmlDocument.parse(body);
-        final List<Map<String, dynamic>> folders = [];
+        try {
+          final document = XmlDocument.parse(body);
+          final List<Map<String, dynamic>> folders = [];
 
-        // Suche nach Elementen mit Namespaces
-        // Die XML hat Namespaces wie d:response, d:href, etc.
-        final root = document.rootElement;
-        print('Root Element: ${root.name.qualified}');
-        
-        // Iteriere durch alle response-Elemente (mit oder ohne Namespace)
-        final allResponses = root.children
-            .whereType<XmlElement>()
-            .where((e) => e.name.local == 'response')
-            .toList();
-        
-        print('Gefundene response-Elemente: ${allResponses.length}');
+          final root = document.rootElement;
+          print('Root Element Tag: ${root.name.qualified}');
+          print('Root Element Local: ${root.name.local}');
+          
+          // Iteriere durch alle response-Elemente
+          final allResponses = root.children
+              .whereType<XmlElement>()
+              .where((e) => e.name.local == 'response')
+              .toList();
+          
+          print('Total <response> elements found: ${allResponses.length}');
 
-        for (var i = 0; i < allResponses.length; i++) {
-          final element = allResponses[i];
-          try {
-            // Suche href-Element (mit Namespace-Handling)
-            final hrefElement = element.findElements('href').firstOrNull ??
-                element.children
+          for (var i = 0; i < allResponses.length; i++) {
+            final element = allResponses[i];
+            print('\n--- Processing response [$i] ---');
+            try {
+              // Suche href-Element
+              final hrefElement = element.findElements('href').firstOrNull ??
+                  element.children
+                      .whereType<XmlElement>()
+                      .firstWhere((e) => e.name.local == 'href', orElse: () => throw 'No href found');
+              
+              final href = hrefElement.innerText;
+              print('  href: "$href"');
+              
+              // Suche displayname
+              XmlElement? displayNameElement;
+              try {
+                displayNameElement = element.children
                     .whereType<XmlElement>()
-                    .firstWhere((e) => e.name.local == 'href', orElse: () => throw 'No href found');
-            
-            final href = hrefElement.innerText;
-            
-            // Ausgabe für Debugging
-            print('[$i] href: "$href"');
-            
-            // Suche propstat > prop > displayname
-            XmlElement? displayNameElement;
-            try {
-              displayNameElement = element.children
-                  .whereType<XmlElement>()
-                  .firstWhere((e) => e.name.local == 'propstat')
-                  .children
-                  .whereType<XmlElement>()
-                  .firstWhere((e) => e.name.local == 'prop')
-                  .children
-                  .whereType<XmlElement>()
-                  .firstWhere((e) => e.name.local == 'displayname');
-            } catch (_) {}
-            
-            final displayName = displayNameElement?.innerText ?? '';
-            print('    displayName: "$displayName"');
-            
-            // Suche resourcetype > collection
-            XmlElement? resourcetypeElement;
-            try {
-              final propElement = element.children
-                  .whereType<XmlElement>()
-                  .firstWhere((e) => e.name.local == 'propstat')
-                  .children
-                  .whereType<XmlElement>()
-                  .firstWhere((e) => e.name.local == 'prop');
-              
-              resourcetypeElement = propElement.children
-                  .whereType<XmlElement>()
-                  .firstWhere((e) => e.name.local == 'resourcetype');
-            } catch (_) {}
-            
-            final isCollection = resourcetypeElement?.children
-                .whereType<XmlElement>()
-                .any((e) => e.name.local == 'collection') ?? false;
-            
-            print('    isCollection: $isCollection');
-            print('    baseUrl: "$baseUrl"');
-
-            // Nur Ordner hinzufügen, nicht die Basis-URL selbst
-            if (isCollection && href.isNotEmpty) {
-              final cleanHref = href.replaceAll(RegExp(r'/$'), '');
-              
-              // Ausnahme: Füge auch die Basis-URL Ordner hinzu
-              final isSelf = cleanHref == baseUrl.replaceAll(RegExp(r'/$'), '');
-              
-              print('    cleanHref: "$cleanHref", isSelf: $isSelf');
-              
-              if (!isSelf) {
-                final folderName = displayName.isNotEmpty 
-                    ? displayName 
-                    : path.basename(cleanHref);
-                
-                print('    ✓ Ordner hinzugefügt: $folderName');
-                
-                folders.add({
-                  'href': cleanHref,
-                  'name': folderName,
-                });
-              } else {
-                print('    ✗ Übersprungen (Basis-Ordner)');
+                    .firstWhere((e) => e.name.local == 'propstat')
+                    .children
+                    .whereType<XmlElement>()
+                    .firstWhere((e) => e.name.local == 'prop')
+                    .children
+                    .whereType<XmlElement>()
+                    .firstWhere((e) => e.name.local == 'displayname');
+              } catch (e) {
+                print('  displayname search error: $e');
               }
-            } else {
-              print('    ✗ Nicht hinzugefügt (kein Ordner oder href leer)');
-            }
-          } catch (e) {
-            print('Fehler beim Parsen eines Ordners: $e');
-          }
-        }
+              
+              final displayName = displayNameElement?.innerText ?? '';
+              print('  displayName: "$displayName"');
+              
+              // Suche resourcetype
+              XmlElement? resourcetypeElement;
+              try {
+                final propElement = element.children
+                    .whereType<XmlElement>()
+                    .firstWhere((e) => e.name.local == 'propstat')
+                    .children
+                    .whereType<XmlElement>()
+                    .firstWhere((e) => e.name.local == 'prop');
+                
+                resourcetypeElement = propElement.children
+                    .whereType<XmlElement>()
+                    .firstWhere((e) => e.name.local == 'resourcetype');
+              } catch (e) {
+                print('  resourcetype search error: $e');
+              }
+              
+              final isCollection = resourcetypeElement?.children
+                  .whereType<XmlElement>()
+                  .any((e) => e.name.local == 'collection') ?? false;
+              
+              print('  isCollection: $isCollection');
 
-        print('Insgesamt ${folders.length} Ordner gefunden');
-        return folders;
+              // Nur Ordner hinzufügen, nicht die Basis-URL selbst
+              if (isCollection && href.isNotEmpty) {
+                // Dekodiere URL-Encoding (z.B. %20 -> Leerzeichen, %C3%A4 -> ä)
+                final decodedHref = Uri.decodeComponent(href);
+                final cleanHref = decodedHref.replaceAll(RegExp(r'/$'), '');
+                final isSelf = cleanHref == baseUrl.replaceAll(RegExp(r'/$'), '');
+                
+                print('  Original href: "$href"');
+                print('  Decoded href: "$decodedHref"');
+                print('  cleanHref: "$cleanHref"');
+                print('  isSelf: $isSelf');
+                
+                if (!isSelf) {
+                  final folderName = displayName.isNotEmpty 
+                      ? displayName 
+                      : path.basename(cleanHref);
+                  
+                  print('  ✓ Added folder: $folderName');
+                  
+                  folders.add({
+                    'href': decodedHref,
+                    'name': folderName,
+                  });
+                } else {
+                  print('  ✗ Skipped (is self/root)');
+                }
+              } else {
+                print('  ✗ Not a collection or empty href');
+              }
+            } catch (e) {
+              print('  Error parsing response: $e');
+            }
+          }
+
+          print('\n==== SUMMARY ====');
+          print('Total folders found: ${folders.length}');
+          if (folders.isEmpty) {
+            print('WARNING: No folders found! Check:');
+            print('  1. WebDAV URL is correct');
+            print('  2. Credentials are valid');
+            print('  3. Server has folders/collections');
+            print('  4. Server responses with proper namespace');
+          }
+          print('================\n');
+          
+          return folders;
+        } catch (parseError) {
+          print('XML Parse Error: $parseError');
+          throw Exception('Fehler beim Parsen der WebDAV-Antwort: $parseError');
+        }
       } else if (response.statusCode == 401 || response.statusCode == 403) {
+        print('Authentication error: ${response.statusCode}');
         throw Exception('Authentifizierungsfehler: Benutzername oder Passwort ungültig (${response.statusCode})');
       } else if (response.statusCode == 404) {
-        throw Exception('Server antwortet mit 404 - WebDAV-URL ist falsch');
+        print('Server returned 404');
+        throw Exception('Server antwortet mit 404 - WebDAV-URL ist falsch oder leer');
       } else {
+        print('Unexpected status code: ${response.statusCode}');
         throw Exception('Server antwortet mit ${response.statusCode}: ${response.reasonPhrase}');
       }
     } on SocketException catch (e) {
+      print('Socket Exception: $e');
       throw Exception('Netzwerkfehler - Server nicht erreichbar: $e');
     } catch (e) {
+      print('General Exception: $e');
       throw Exception('Fehler beim Auflisten der Ordner: $e');
     }
   }
@@ -331,10 +488,13 @@ class WebdavSyncService {
 
         for (var element in responseElements) {
           try {
-            final href = element.children
+            var href = element.children
                 .whereType<XmlElement>()
                 .firstWhere((e) => e.name.local == 'href', orElse: () => XmlElement(XmlName('empty')))
                 .innerText;
+            
+            // Dekodiere URL-Encoding
+            href = Uri.decodeComponent(href);
             
             final folderPathClean = folderPath.replaceAll(RegExp(r'/$'), '');
             if (href.isEmpty || href == folderPath || href == '$folderPath/' || href == folderPathClean || href == '$folderPathClean/') {
@@ -560,6 +720,34 @@ class WebdavSyncService {
       throw Exception('Netzwerkfehler beim Download: $e');
     } catch (e) {
       throw Exception('Fehler beim Download der Datei: $e');
+    }
+  }
+
+  /// Berechnet den SHA256-Hash einer Remote-Datei
+  Future<String> _calculateRemoteFileHash(String remotePath) async {
+    try {
+      final url = _buildUrl(remotePath);
+      final auth = _buildAuthHeader();
+
+      final response = await _httpClient
+          .get(
+            Uri.parse(url),
+            headers: {'Authorization': auth},
+          )
+          .timeout(
+            Duration(seconds: _responseTimeoutSeconds),
+            onTimeout: () => throw SocketException('Verbindungszeitüberschreitung beim Hash-Download'),
+          );
+
+      if (response.statusCode == 200) {
+        // Berechne SHA256 Hash
+        final hash = sha256.convert(response.bodyBytes).toString();
+        return hash;
+      } else {
+        throw Exception('Fehler beim Abrufen der Datei für Hash-Berechnung: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw Exception('Fehler beim Hash-Berechnen: $e');
     }
   }
 

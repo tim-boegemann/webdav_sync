@@ -47,6 +47,9 @@ dependencies:
   # HTTP client for WebDAV operations
   http: ^1.0.0
   
+  # Cryptographic functions for hash calculation
+  crypto: ^3.0.0
+  
   # XML parsing
   xml: ^6.0.0
   

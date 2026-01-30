@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import '../models/sync_config.dart';
 import '../providers/sync_provider.dart';
 import '../services/path_provider_service.dart';
+import '../theme/app_colors.dart';
 
 class ConfigScreen extends StatefulWidget {
   final SyncConfig? configToEdit;
@@ -23,11 +24,8 @@ class _ConfigScreenState extends State<ConfigScreen> {
   late TextEditingController _localFolderController;
   late TextEditingController _syncIntervalController;
   bool _autoSync = false;
-  bool _isTesting = false;
   bool _showPassword = false;
   String? _lastError;
-  bool _showResourceList = false;
-  bool _isLoadingFolders = false;
   bool _isNewConfig = false;
 
   @override
@@ -102,73 +100,6 @@ class _ConfigScreenState extends State<ConfigScreen> {
     }
   }
 
-  Future<void> _testConnection() async {
-    try {
-      setState(() => _isTesting = true);
-
-      final config = SyncConfig(
-        id: widget.configToEdit?.id,
-        name: _configNameController.text.isEmpty 
-            ? 'Temp Config' 
-            : _configNameController.text,
-        webdavUrl: _webdavUrlController.text,
-        username: _usernameController.text,
-        password: _passwordController.text,
-        remoteFolder: _remoteFolderController.text,
-        localFolder: _localFolderController.text,
-        syncIntervalMinutes: int.tryParse(_syncIntervalController.text) ?? 15,
-        autoSync: _autoSync,
-      );
-
-      context.read<SyncProvider>().syncService.initialize(config);
-      
-      // Lade Remote-Ressourcen
-      await context.read<SyncProvider>().loadRemoteResources();
-      
-      final provider = context.read<SyncProvider>();
-      final validationError = provider.validationError;
-
-      setState(() {
-        _isTesting = false;
-        _lastError = validationError;
-        _showResourceList = validationError == null && provider.remoteResources.isNotEmpty;
-      });
-
-      if (mounted) {
-        if (validationError != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Fehler: $validationError'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 5),
-            ),
-          );
-        } else if (provider.remoteResources.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Keine Ressourcen gefunden - Ordner ist leer oder Pfad ungültig'),
-              backgroundColor: Color(0xFFF59E0B),
-            ),
-          );
-        } else {
-          // Verbindung erfolgreich - speichere Konfiguration automatisch
-          await context.read<SyncProvider>().saveConfig(config);
-          
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('✓ ${provider.remoteResources.length} Ressourcen gefunden! Konfiguration gespeichert.'),
-              backgroundColor: const Color(0xFF2563EB),
-              duration: const Duration(seconds: 4),
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      _handleException(e, 'Fehler beim Verbindungstest');
-      setState(() => _isTesting = false);
-    }
-  }
-
   void _handleException(dynamic exception, String title) {
     final errorMessage = '$title: ${exception.toString()}';
     
@@ -187,60 +118,63 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
   Future<void> _showFolderSelector() async {
     try {
-      setState(() => _isLoadingFolders = true);
-
-      // Hole Liste der verfügbaren Ordner
-      final folders = await context.read<SyncProvider>().getRemoteFolders();
-
-      if (!mounted) return;
-
-      setState(() => _isLoadingFolders = false);
-
-      if (folders.isEmpty) {
+      if (_webdavUrlController.text.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Keine Ordner auf dem WebDAV-Server gefunden'),
+            content: Text('Bitte gib eine WebDAV URL ein'),
             backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
+        return;
+      }
+      
+      if (_usernameController.text.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Bitte gib einen Benutzernamen ein'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
+        return;
+      }
+      
+      if (_passwordController.text.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Bitte gib ein Passwort ein'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
           ),
         );
         return;
       }
 
-      // Zeige Dialog mit Ordner-Liste
+      final config = SyncConfig(
+        id: widget.configToEdit?.id,
+        name: _configNameController.text.isEmpty 
+            ? 'Temp Config' 
+            : _configNameController.text,
+        webdavUrl: _webdavUrlController.text,
+        username: _usernameController.text,
+        password: _passwordController.text,
+        remoteFolder: _remoteFolderController.text,
+        localFolder: _localFolderController.text,
+        syncIntervalMinutes: int.tryParse(_syncIntervalController.text) ?? 15,
+        autoSync: _autoSync,
+      );
+
+      context.read<SyncProvider>().syncService.initialize(config);
+
       final selected = await showDialog<String>(
         context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Wähle Remote-Ordner'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: ListView.builder(
-              shrinkWrap: true,
-              itemCount: folders.length,
-              itemBuilder: (context, index) {
-                final folder = folders[index];
-                final folderName = folder['name'] as String;
-                final folderPath = folder['href'] as String;
-                
-                return ListTile(
-                  leading: const Icon(Icons.folder),
-                  title: Text(folderName),
-                  subtitle: Text(
-                    folderPath,
-                    style: const TextStyle(fontSize: 10),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  onTap: () => Navigator.pop(context, folderPath),
-                );
-              },
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Abbrechen'),
-            ),
-          ],
+        builder: (context) => _FolderNavigatorDialog(
+          initialPath: _webdavUrlController.text,
+          onFolderSelected: (folderPath) {
+            Navigator.pop(context, folderPath);
+          },
+          syncProvider: context.read<SyncProvider>(),
         ),
       );
 
@@ -250,8 +184,15 @@ class _ConfigScreenState extends State<ConfigScreen> {
         });
       }
     } catch (e) {
-      _handleException(e, 'Fehler beim Laden der Ordner');
-      setState(() => _isLoadingFolders = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Fehler beim Laden der Ordner: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
     }
   }
 
@@ -444,14 +385,8 @@ class _ConfigScreenState extends State<ConfigScreen> {
                           borderRadius: BorderRadius.circular(8),
                         ),
                         suffixIcon: IconButton(
-                          icon: _isLoadingFolders
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.folder_open),
-                          onPressed: _isLoadingFolders ? null : _showFolderSelector,
+                          icon: const Icon(Icons.folder_open),
+                          onPressed: _showFolderSelector,
                           tooltip: 'Wähle Ordner aus WebDAV',
                         ),
                       ),
@@ -497,112 +432,15 @@ class _ConfigScreenState extends State<ConfigScreen> {
               ),
             ),
             const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: _isTesting ? null : _testConnection,
-              icon: _isTesting
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor:
-                            AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
-                  : const Icon(Icons.cloud),
-              label: Text(_isTesting ? 'Teste...' : 'Test Connection & Ressourcen'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-            ),
-            const SizedBox(height: 12),
-            // Ressourcenliste anzeigen
-            Consumer<SyncProvider>(
-              builder: (context, provider, _) {
-                if (provider.remoteResources.isEmpty) {
-                  return const SizedBox.shrink();
-                }
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Card(
-                      color: Colors.blue[50],
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  'Gefundene Ressourcen (${provider.remoteResources.length})',
-                                  style: const TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.blue,
-                                  ),
-                                ),
-                                IconButton(
-                                  icon: Icon(_showResourceList ? Icons.expand_less : Icons.expand_more),
-                                  onPressed: () {
-                                    setState(() => _showResourceList = !_showResourceList);
-                                  },
-                                  padding: EdgeInsets.zero,
-                                  constraints: const BoxConstraints(),
-                                ),
-                              ],
-                            ),
-                            if (_showResourceList) ...[
-                              const Divider(),
-                              const SizedBox(height: 8),
-                              ...provider.remoteResources.map((resource) {
-                                final isFolder = resource['isFolder'] as bool;
-                                final name = resource['name'] as String;
-                                final size = resource['size'] as String;
-                                
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(vertical: 4),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        isFolder ? Icons.folder : Icons.insert_drive_file,
-                                        size: 18,
-                                        color: isFolder ? Colors.blue : Colors.grey,
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: Text(
-                                          name,
-                                          style: const TextStyle(fontSize: 12),
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                      if (!isFolder && size != '0')
-                                        Text(
-                                          ' (${_formatFileSize(int.parse(size))})',
-                                          style: TextStyle(fontSize: 11, color: Colors.grey[600]),
-                                        ),
-                                    ],
-                                  ),
-                                );
-                              }).toList(),
-                            ],
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-                );
-              },
-            ),
+            const SizedBox(height: 24),
             ElevatedButton.icon(
               onPressed: _saveConfig,
               icon: const Icon(Icons.save),
               label: const Text('Save Configuration'),
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 12),
+                backgroundColor: AppColors.primaryButtonBackground,
+                foregroundColor: AppColors.primaryButtonForeground,
               ),
             ),
           ],
@@ -610,11 +448,179 @@ class _ConfigScreenState extends State<ConfigScreen> {
       ),
     );
   }
+}
 
-  String _formatFileSize(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+/// Dialog für interaktive Ordner-Navigation
+class _FolderNavigatorDialog extends StatefulWidget {
+  final String initialPath;
+  final Function(String) onFolderSelected;
+  final SyncProvider syncProvider;
+
+  const _FolderNavigatorDialog({
+    required this.initialPath,
+    required this.onFolderSelected,
+    required this.syncProvider,
+  });
+
+  @override
+  State<_FolderNavigatorDialog> createState() => _FolderNavigatorDialogState();
+}
+
+class _FolderNavigatorDialogState extends State<_FolderNavigatorDialog> {
+  late String currentPath;
+  List<Map<String, dynamic>> currentFolders = [];
+  bool isLoading = false;
+  String? errorMessage;
+  List<String> navigationStack = [];
+
+  @override
+  void initState() {
+    super.initState();
+    currentPath = widget.initialPath;
+    navigationStack.add(widget.initialPath);
+    _loadFolders();
+  }
+
+  Future<void> _loadFolders() async {
+    setState(() {
+      isLoading = true;
+      errorMessage = null;
+    });
+
+    try {
+      currentFolders = await widget.syncProvider.syncService.getRemoteFoldersAtPath(currentPath);
+    } catch (e) {
+      setState(() {
+        errorMessage = e.toString();
+      });
+    }
+
+    setState(() {
+      isLoading = false;
+    });
+  }
+
+  void _navigateToFolder(String folderPath) {
+    setState(() {
+      currentPath = folderPath;
+      navigationStack.add(folderPath);
+    });
+    _loadFolders();
+  }
+
+  void _goBack() {
+    if (navigationStack.length > 1) {
+      navigationStack.removeLast();
+      setState(() {
+        currentPath = navigationStack.last;
+      });
+      _loadFolders();
+    }
+  }
+
+  String _getBreadcrumb() {
+    final uri = Uri.parse(currentPath);
+    final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+    
+    if (segments.isEmpty) {
+      return '/';
+    }
+    
+    return '/' + segments.join(' > ');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Ordner auswählen'),
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.grey[100],
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              _getBreadcrumb(),
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : errorMessage != null
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.error_outline, color: Colors.red[700], size: 48),
+                        const SizedBox(height: 16),
+                        Text(
+                          errorMessage!,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.red[700]),
+                        ),
+                      ],
+                    ),
+                  )
+                : currentFolders.isEmpty
+                    ? const Center(
+                        child: Text('Keine Unterordner vorhanden'),
+                      )
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: currentFolders.length,
+                        itemBuilder: (context, index) {
+                          final folder = currentFolders[index];
+                          final folderName = folder['name'] as String;
+                          final folderPath = folder['href'] as String;
+
+                          return ListTile(
+                            leading: const Icon(Icons.folder),
+                            title: Text(folderName),
+                            subtitle: Text(
+                              folderPath,
+                              style: const TextStyle(fontSize: 10),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            onTap: () {
+                              widget.onFolderSelected(folderPath);
+                            },
+                            onLongPress: () {
+                              _navigateToFolder(folderPath);
+                            },
+                            trailing: IconButton(
+                              icon: const Icon(Icons.arrow_forward),
+                              onPressed: () {
+                                _navigateToFolder(folderPath);
+                              },
+                              tooltip: 'In Ordner navigieren',
+                            ),
+                          );
+                        },
+                      ),
+      ),
+      actions: [
+        if (navigationStack.length > 1)
+          TextButton.icon(
+            onPressed: _goBack,
+            icon: const Icon(Icons.arrow_back),
+            label: const Text('Zurück'),
+          ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Abbrechen'),
+        ),
+      ],
+    );
   }
 }

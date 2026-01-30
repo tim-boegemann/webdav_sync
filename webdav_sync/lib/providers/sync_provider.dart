@@ -4,6 +4,7 @@ import '../models/sync_status.dart';
 import '../services/webdav_sync_service.dart';
 import '../services/config_service.dart';
 import '../services/path_provider_service.dart';
+import '../services/shortcuts_handler.dart';
 
 class SyncProvider extends ChangeNotifier {
   final WebdavSyncService _syncService = WebdavSyncService();
@@ -30,6 +31,81 @@ class SyncProvider extends ChangeNotifier {
 
   SyncProvider() {
     _loadConfigs();
+    _initializeShortcuts();
+  }
+
+  /// Initialisiere Shortcuts-Handler
+  void _initializeShortcuts() {
+    ShortcutsHandler.initialize();
+    ShortcutsHandler.onShortcutCommand = (command, params) {
+      _handleShortcutCommand(command, params);
+    };
+  }
+
+  /// Handle Shortcuts-Befehle von iOS App Intents
+  Future<void> _handleShortcutCommand(String command, Map<String, String> params) async {
+    print('SyncProvider: Handle Shortcut Command - $command');
+    
+    final cmd = parseShortcutCommand(command);
+    
+    switch (cmd) {
+      case ShortcutCommand.syncAll:
+        await _syncAllConfigs();
+        break;
+        
+      case ShortcutCommand.syncConfig:
+        final configName = params['configName'];
+        if (configName != null) {
+          await _syncConfigByName(configName);
+        }
+        break;
+        
+      case ShortcutCommand.getStatus:
+        _printSyncStatus();
+        break;
+    }
+  }
+
+  /// Synchronisiere alle Konfigurationen nacheinander
+  Future<void> _syncAllConfigs() async {
+    print('SyncProvider: Synchronisiere alle ${_allConfigs.length} Konfigurationen');
+    
+    for (final config in _allConfigs) {
+      await setCurrentConfig(config);
+      await performSync();
+      print('SyncProvider: Sync für "${config.name}" abgeschlossen');
+    }
+    
+    print('SyncProvider: Alle Synchronisierungen abgeschlossen');
+  }
+
+  /// Synchronisiere eine spezifische Konfiguration nach Name
+  Future<void> _syncConfigByName(String configName) async {
+    try {
+      final config = _allConfigs.firstWhere((c) => c.name == configName);
+      print('SyncProvider: Synchronisiere Config: $configName');
+      
+      await setCurrentConfig(config);
+      await performSync();
+      
+      print('SyncProvider: Sync für "$configName" abgeschlossen');
+    } catch (e) {
+      print('SyncProvider: Fehler bei Sync für $configName: $e');
+    }
+  }
+
+  /// Gebe aktuellen Sync-Status aus
+  void _printSyncStatus() {
+    print('=== WebDAV Sync Status ===');
+    print('Aktuelle Config: ${_config?.name ?? "Keine"}');
+    print('Syncing: $_isLoading');
+    print('Status: ${_syncStatus?.status ?? "Kein Status"}');
+    print('Letzer Sync: ${_syncStatus?.lastSyncTime ?? "Nie"}');
+    print('Files Synced: ${_syncStatus?.filesSync ?? 0}');
+    if (_syncStatus?.error != null) {
+      print('Error: ${_syncStatus?.error}');
+    }
+    print('===========================');
   }
 
   Future<void> _loadConfigs() async {
@@ -49,8 +125,13 @@ class SyncProvider extends ChangeNotifier {
     
     if (_config != null) {
       _syncService.initialize(_config!);
+      await _syncService.initializeHashDatabase();
       _validationError = _syncService.validateConfig();
     }
+    
+    // Lade den SyncStatus für diese Config
+    _syncStatus = await _configService.getLastSyncStatus(_config!.id);
+    
     notifyListeners();
   }
 
@@ -58,7 +139,12 @@ class SyncProvider extends ChangeNotifier {
     _config = config;
     await _configService.setSelectedConfigId(config.id);
     _syncService.initialize(config);
+    await _syncService.initializeHashDatabase();
     _validationError = _syncService.validateConfig();
+    
+    // Lade den SyncStatus für diese Config
+    _syncStatus = await _configService.getLastSyncStatus(config.id);
+    
     notifyListeners();
   }
 
@@ -70,7 +156,12 @@ class SyncProvider extends ChangeNotifier {
     _allConfigs = await _configService.getAllConfigs();
     
     _syncService.initialize(config);
+    await _syncService.initializeHashDatabase();
     _validationError = _syncService.validateConfig();
+    
+    // Setze SyncStatus auf null für neue Config
+    _syncStatus = null;
+    
     notifyListeners();
   }
 
@@ -103,6 +194,7 @@ class SyncProvider extends ChangeNotifier {
         issyncing: false,
         lastSyncTime: DateTime.now().toString(),
         filesSync: 0,
+        filesSkipped: 0,
         status: 'Konfigurationsvalidierung fehlgeschlagen',
         error: _validationError,
       );
@@ -115,6 +207,9 @@ class SyncProvider extends ChangeNotifier {
     _totalSyncFiles = 0;
     notifyListeners();
 
+    // Initialisiere Hash-Datenbank
+    await _syncService.initializeHashDatabase();
+
     // Setze Progress-Callback
     _syncService.onProgressUpdate = (current, total) {
       _currentSyncProgress = current;
@@ -124,9 +219,18 @@ class SyncProvider extends ChangeNotifier {
 
     _syncStatus = await _syncService.performSync();
     await _configService.setLastSyncTime(_syncStatus!.lastSyncTime);
+    
+    // Speichere kompletten SyncStatus persistent pro Config
+    await _configService.saveSyncStatus(_syncStatus!, _config!.id);
 
     _isLoading = false;
     notifyListeners();
+  }
+
+  /// Bricht den aktuellen Sync-Vorgang ab
+  void cancelSync() {
+    print('Sync-Abbruch angefordert');
+    _syncService.cancelSync();
   }
 
   Future<int> countFilesToSync() async {
@@ -174,7 +278,8 @@ class SyncProvider extends ChangeNotifier {
   }
 
   Future<List<Map<String, dynamic>>> getRemoteFolders() async {
-    _validationError = _syncService.validateConfig();
+    // Validiere nur WebDAV-Anmeldedaten, nicht die komplette Config
+    _validationError = _syncService.validateWebDAVCredentials();
     if (_validationError != null) {
       throw Exception(_validationError);
     }
