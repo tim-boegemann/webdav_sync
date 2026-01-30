@@ -19,7 +19,7 @@ class AppColors {
   static const Color accent = Color(0xFF2563EB);
   
   // Status colors
-  static const Color success = Color(0xFF10B981);
+  static const Color success = Color(0xFF4B5563);  // Same as primaryButtonBackground
   static const Color warning = Color(0xFFF59E0B);
   static const Color error = Colors.red;
 }

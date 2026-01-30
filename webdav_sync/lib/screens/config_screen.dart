@@ -89,7 +89,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(_isNewConfig ? 'Profil erstellt!' : 'Profil aktualisiert!'),
-          backgroundColor: const Color(0xFF2563EB),
+          backgroundColor: AppColors.success,
         ),
       );
 
@@ -109,7 +109,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(errorMessage),
-          backgroundColor: Colors.red,
+          backgroundColor: AppColors.error,
           duration: const Duration(seconds: 5),
         ),
       );
@@ -122,7 +122,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Bitte gib eine WebDAV URL ein'),
-            backgroundColor: Colors.orange,
+            backgroundColor: AppColors.warning,
             duration: Duration(seconds: 3),
           ),
         );
@@ -133,7 +133,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Bitte gib einen Benutzernamen ein'),
-            backgroundColor: Colors.orange,
+            backgroundColor: AppColors.warning,
             duration: Duration(seconds: 3),
           ),
         );
@@ -144,7 +144,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Bitte gib ein Passwort ein'),
-            backgroundColor: Colors.orange,
+            backgroundColor: AppColors.warning,
             duration: Duration(seconds: 3),
           ),
         );
@@ -188,7 +188,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Fehler beim Laden der Ordner: $e'),
-            backgroundColor: Colors.red,
+            backgroundColor: AppColors.error,
             duration: const Duration(seconds: 5),
           ),
         );
@@ -208,7 +208,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Ordner gewählt: $selectedDirectory'),
-            backgroundColor: const Color(0xFF2563EB),
+            backgroundColor: AppColors.success,
             duration: const Duration(seconds: 2),
           ),
         );

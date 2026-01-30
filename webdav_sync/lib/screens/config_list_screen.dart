@@ -195,7 +195,7 @@ class _ConfigListScreenState extends State<ConfigListScreen> {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text('Profil "${config.name}" gelöscht'),
-                  backgroundColor: const Color(0xFF2563EB),
+                  backgroundColor: AppColors.success,
                   duration: const Duration(seconds: 2),
                 ),
               );

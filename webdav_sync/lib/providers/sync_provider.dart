@@ -127,10 +127,10 @@ class SyncProvider extends ChangeNotifier {
       _syncService.initialize(_config!);
       await _syncService.initializeHashDatabase();
       _validationError = _syncService.validateConfig();
+      
+      // Lade den SyncStatus für diese Config
+      _syncStatus = await _configService.getLastSyncStatus(_config!.id);
     }
-    
-    // Lade den SyncStatus für diese Config
-    _syncStatus = await _configService.getLastSyncStatus(_config!.id);
     
     notifyListeners();
   }
@@ -159,8 +159,8 @@ class SyncProvider extends ChangeNotifier {
     await _syncService.initializeHashDatabase();
     _validationError = _syncService.validateConfig();
     
-    // Setze SyncStatus auf null für neue Config
-    _syncStatus = null;
+    // Lade den bestehenden SyncStatus für diese Config (nicht null setzen!)
+    _syncStatus = await _configService.getLastSyncStatus(config.id);
     
     notifyListeners();
   }
