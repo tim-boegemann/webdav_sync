@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../models/sync_config.dart';
+import '../models/sync_status.dart';
 import '../providers/sync_provider.dart';
 import '../theme/app_colors.dart';
 import 'config_screen.dart';
@@ -13,7 +14,25 @@ class ConfigListScreen extends StatefulWidget {
   State<ConfigListScreen> createState() => _ConfigListScreenState();
 }
 
-class _ConfigListScreenState extends State<ConfigListScreen> {
+class _ConfigListScreenState extends State<ConfigListScreen>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _rotationController;
+
+  @override
+  void initState() {
+    super.initState();
+    _rotationController = AnimationController(
+      duration: const Duration(seconds: 2),
+      vsync: this,
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _rotationController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -62,100 +81,189 @@ class _ConfigListScreenState extends State<ConfigListScreen> {
               final config = configs[index];
               final isSelected = currentConfig?.id == config.id;
 
-              return Card(
-                elevation: isSelected ? 4 : 1,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  side: isSelected
-                      ? const BorderSide(
-                          color: AppColors.primaryButtonBackground,
-                          width: 2,
-                        )
-                      : BorderSide.none,
-                ),
-                child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 12,
+              return InkWell(
+                onTap: () {
+                  context.read<SyncProvider>().setCurrentConfig(config);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const SyncScreen()),
+                  );
+                },
+                child: Card(
+                  elevation: isSelected ? 4 : 1,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    side: isSelected
+                        ? const BorderSide(
+                            color: AppColors.primaryButtonBackground,
+                            width: 2,
+                          )
+                        : BorderSide.none,
                   ),
-                  leading: Icon(
-                    Icons.cloud_sync,
-                    color: isSelected ? AppColors.primaryButtonBackground : Colors.grey,
-                    size: 28,
-                  ),
-                  title: Text(
-                    config.name,
-                    style: TextStyle(
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                      fontSize: 16,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 12,
                     ),
-                  ),
-                  subtitle: Text(
-                    '${config.webdavUrl}\n↔ ${config.localFolder}',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  trailing: PopupMenuButton<String>(
-                    onSelected: (value) {
-                      if (value == 'edit') {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => ConfigScreen(configToEdit: config),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          // Zeige rotierendes Icon während Sync läuft, sonst normales Icon
+                          if (syncProvider.isLoading &&
+                              syncProvider.config?.id == config.id)
+                            RotationTransition(
+                              turns: _rotationController,
+                              child: Icon(
+                                Icons.cloud_sync,
+                                color: AppColors.primaryButtonBackground,
+                                size: 28,
+                              ),
+                            )
+                          else
+                            Icon(
+                              Icons.cloud_sync,
+                              color: isSelected
+                                  ? AppColors.primaryButtonBackground
+                                  : Colors.grey,
+                              size: 28,
+                            ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  config.name,
+                                  style: TextStyle(
+                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${config.webdavUrl}\n↔ ${config.localFolder}',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                ),
+                              ],
+                            ),
                           ),
-                        );
-                      } else if (value == 'delete') {
-                        _showDeleteConfirmation(context, config);
-                      } else if (value == 'sync') {
-                        context.read<SyncProvider>().setCurrentConfig(config);
-                        Navigator.of(context).pushReplacement(
-                          MaterialPageRoute(builder: (_) => const SyncScreen()),
-                        );
-                      }
-                    },
-                    itemBuilder: (BuildContext context) => [
-                      PopupMenuItem<String>(
-                        value: 'sync',
-                        child: Row(
-                          children: [
-                            const Icon(Icons.sync, size: 18),
-                            const SizedBox(width: 8),
-                            const Text('Synchronisieren'),
-                          ],
-                        ),
+                          PopupMenuButton<String>(
+                            onSelected: (value) {
+                              if (value == 'edit') {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => ConfigScreen(configToEdit: config),
+                                  ),
+                                );
+                              } else if (value == 'delete') {
+                                _showDeleteConfirmation(context, config);
+                              } else if (value == 'sync') {
+                                context.read<SyncProvider>().setCurrentConfig(config);
+                                Navigator.of(context).pushReplacement(
+                                  MaterialPageRoute(builder: (_) => const SyncScreen()),
+                                );
+                              }
+                            },
+                            itemBuilder: (BuildContext context) => [
+                              PopupMenuItem<String>(
+                                value: 'sync',
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.sync, size: 18),
+                                    const SizedBox(width: 8),
+                                    const Text('Synchronisieren'),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem<String>(
+                                value: 'edit',
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.edit, size: 18),
+                                    const SizedBox(width: 8),
+                                    const Text('Bearbeiten'),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem<String>(
+                                value: 'delete',
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.delete, size: 18, color: Colors.red),
+                                    const SizedBox(width: 8),
+                                    const Text('Löschen', style: TextStyle(color: Colors.red)),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
-                      PopupMenuItem<String>(
-                        value: 'edit',
-                        child: Row(
-                          children: [
-                            const Icon(Icons.edit, size: 18),
-                            const SizedBox(width: 8),
-                            const Text('Bearbeiten'),
-                          ],
-                        ),
-                      ),
-                      PopupMenuItem<String>(
-                        value: 'delete',
-                        child: Row(
-                          children: [
-                            const Icon(Icons.delete, size: 18, color: Colors.red),
-                            const SizedBox(width: 8),
-                            const Text('Löschen', style: TextStyle(color: Colors.red)),
-                          ],
-                        ),
+                      const SizedBox(height: 12),
+                      // Sync Status Information
+                      FutureBuilder<SyncStatus?>(
+                        future: context.read<SyncProvider>().getSyncStatusForConfig(config.id),
+                        builder: (context, snapshot) {
+                          final syncStatus = snapshot.data;
+                          
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Status: ${syncStatus?.status ?? '-'}',
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey[700],
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                _formatSyncDateTime(syncStatus?.lastSyncTime),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey[700],
+                                ),
+                              ),
+                              if (config.autoSync)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: FutureBuilder<String>(
+                                    future: context.read<SyncProvider>().getNextSyncTimeForConfig(config, syncStatus),
+                                    builder: (context, nextSyncSnapshot) {
+                                      return Text(
+                                        'Nächster Sync: ${nextSyncSnapshot.data ?? '-'}',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.grey[700],
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ),
+                              if (!config.autoSync)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4),
+                                  child: Text(
+                                    'Auto Sync: false',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey[700],
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          );
+                        },
                       ),
                     ],
                   ),
-                  onTap: isSelected
-                      ? () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => const SyncScreen()),
-                          );
-                        }
-                      : () {
-                          context.read<SyncProvider>().setCurrentConfig(config);
-                        },
                 ),
+              ),
               );
             },
           );
@@ -205,5 +313,25 @@ class _ConfigListScreenState extends State<ConfigListScreen> {
         ],
       ),
     );
+  }
+
+  /// Formatiert den lastSyncTime in das Format "Letzter Sync: TT.MM.JJJJ HH:MM"
+  String _formatSyncDateTime(String? dateTimeString) {
+    if (dateTimeString == null || dateTimeString.isEmpty) {
+      return 'Letzter Sync: -';
+    }
+
+    try {
+      final dateTime = DateTime.parse(dateTimeString);
+      final day = dateTime.day.toString().padLeft(2, '0');
+      final month = dateTime.month.toString().padLeft(2, '0');
+      final year = dateTime.year;
+      final hour = dateTime.hour.toString().padLeft(2, '0');
+      final minute = dateTime.minute.toString().padLeft(2, '0');
+      
+      return 'Letzter Sync: $day.$month.$year $hour:$minute';
+    } catch (e) {
+      return 'Letzter Sync: -';
+    }
   }
 }

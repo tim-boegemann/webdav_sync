@@ -103,6 +103,7 @@ class ConfigService {
       'filesSkipped': status.filesSkipped,
       'status': status.status,
       'error': status.error,
+      'nextScheduledSyncTime': status.nextScheduledSyncTime,
     };
     // Speichere pro Config mit eindeutigem Key
     await prefs.setString('sync_status_$configId', jsonEncode(statusMap));
@@ -123,6 +124,7 @@ class ConfigService {
           filesSkipped: map['filesSkipped'] as int? ?? 0,
           status: map['status'] as String? ?? '',
           error: map['error'] as String?,
+          nextScheduledSyncTime: map['nextScheduledSyncTime'] as String?,
         );
       } catch (e) {
         return null;

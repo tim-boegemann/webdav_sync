@@ -5,6 +5,7 @@ class SyncStatus {
   final int filesSkipped;
   final String status;
   final String? error;
+  final String? nextScheduledSyncTime;
 
   SyncStatus({
     required this.issyncing,
@@ -13,5 +14,6 @@ class SyncStatus {
     required this.filesSkipped,
     required this.status,
     this.error,
+    this.nextScheduledSyncTime,
   });
 }

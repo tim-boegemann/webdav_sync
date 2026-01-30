@@ -21,6 +21,12 @@ class SyncScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('WebDAV Sync'),
         elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            Navigator.of(context).pop();
+          },
+        ),
       ),
       body: Consumer<SyncProvider>(
         builder: (context, syncProvider, _) {
@@ -130,6 +136,21 @@ class SyncScreen extends StatelessWidget {
                                 : '-'),
                         _buildInfoRow('Time:',
                             syncProvider.syncStatus?.lastSyncTime ?? '-'),
+                        if (syncProvider.config?.autoSync ?? false)
+                          FutureBuilder<String>(
+                            future: syncProvider.syncStatus != null
+                                ? syncProvider.getNextSyncTimeForConfig(
+                                    syncProvider.config!,
+                                    syncProvider.syncStatus,
+                                  )
+                                : Future.value('-'),
+                            builder: (context, snapshot) {
+                              return _buildInfoRow(
+                                'Next Sync:',
+                                snapshot.data ?? '-',
+                              );
+                            },
+                          ),
                         if (syncProvider.isLoading && syncProvider.totalSyncFiles > 0)
                           Padding(
                             padding: const EdgeInsets.only(top: 12),

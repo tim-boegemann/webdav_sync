@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import '../models/sync_config.dart';
 import '../models/sync_status.dart';
 import '../services/webdav_sync_service.dart';
@@ -18,6 +19,7 @@ class SyncProvider extends ChangeNotifier {
   List<Map<String, dynamic>> _remoteResources = [];
   int _currentSyncProgress = 0;
   int _totalSyncFiles = 0;
+  Timer? _autoSyncTimer;
 
   SyncStatus? get syncStatus => _syncStatus;
   SyncConfig? get config => _config;
@@ -32,6 +34,13 @@ class SyncProvider extends ChangeNotifier {
   SyncProvider() {
     _loadConfigs();
     _initializeShortcuts();
+    _startAutoSyncTimer();
+  }
+
+  @override
+  void dispose() {
+    _autoSyncTimer?.cancel();
+    super.dispose();
   }
 
   /// Initialisiere Shortcuts-Handler
@@ -220,6 +229,25 @@ class SyncProvider extends ChangeNotifier {
     _syncStatus = await _syncService.performSync();
     await _configService.setLastSyncTime(_syncStatus!.lastSyncTime);
     
+    // Berechne die nächste geplante Sync-Zeit, wenn Auto Sync aktiviert ist
+    if (_config!.autoSync) {
+      try {
+        final lastSyncTime = DateTime.parse(_syncStatus!.lastSyncTime);
+        final nextSyncTime = lastSyncTime.add(Duration(minutes: _config!.syncIntervalMinutes));
+        _syncStatus = SyncStatus(
+          issyncing: _syncStatus!.issyncing,
+          lastSyncTime: _syncStatus!.lastSyncTime,
+          filesSync: _syncStatus!.filesSync,
+          filesSkipped: _syncStatus!.filesSkipped,
+          status: _syncStatus!.status,
+          error: _syncStatus!.error,
+          nextScheduledSyncTime: nextSyncTime.toIso8601String(),
+        );
+      } catch (e) {
+        print('Fehler beim Berechnen der nächsten Sync-Zeit: $e');
+      }
+    }
+    
     // Speichere kompletten SyncStatus persistent pro Config
     await _configService.saveSyncStatus(_syncStatus!, _config!.id);
 
@@ -293,4 +321,97 @@ class SyncProvider extends ChangeNotifier {
   String getPlatformName() {
     return PathProviderService.getPlatformName();
   }
+
+  /// Berechnet die nächste geplante Sync-Zeit basierend auf dem letzten Sync und dem Intervall
+  String getNextSyncTime() {
+    if (_config == null || !_config!.autoSync || _syncStatus == null) {
+      return '-';
+    }
+
+    try {
+      // Nutze die gespeicherte nextScheduledSyncTime falls vorhanden
+      if (_syncStatus!.nextScheduledSyncTime != null) {
+        final nextSyncTime = DateTime.parse(_syncStatus!.nextScheduledSyncTime!);
+        return '${nextSyncTime.day.toString().padLeft(2, '0')}.${nextSyncTime.month.toString().padLeft(2, '0')}.${nextSyncTime.year} ${nextSyncTime.hour.toString().padLeft(2, '0')}:${nextSyncTime.minute.toString().padLeft(2, '0')}';
+      }
+      
+      // Fallback: Berechne die nächste Sync-Zeit basierend auf letztem Sync + Intervall
+      final lastSyncTime = DateTime.parse(_syncStatus!.lastSyncTime);
+      final nextSyncTime = lastSyncTime.add(Duration(minutes: _config!.syncIntervalMinutes));
+      
+      return '${nextSyncTime.day.toString().padLeft(2, '0')}.${nextSyncTime.month.toString().padLeft(2, '0')}.${nextSyncTime.year} ${nextSyncTime.hour.toString().padLeft(2, '0')}:${nextSyncTime.minute.toString().padLeft(2, '0')}';
+    } catch (e) {
+      print('Fehler beim Berechnen der nächsten Sync-Zeit: $e');
+      return '-';
+    }
+  }
+
+  /// Berechnet die nächste geplante Sync-Zeit für eine beliebige Config
+  Future<String> getNextSyncTimeForConfig(SyncConfig config, SyncStatus? syncStatus) async {
+    if (!config.autoSync || syncStatus == null) {
+      return '-';
+    }
+
+    try {
+      // Nutze die gespeicherte nextScheduledSyncTime falls vorhanden
+      if (syncStatus.nextScheduledSyncTime != null) {
+        final nextSyncTime = DateTime.parse(syncStatus.nextScheduledSyncTime!);
+        return '${nextSyncTime.day.toString().padLeft(2, '0')}.${nextSyncTime.month.toString().padLeft(2, '0')}.${nextSyncTime.year} ${nextSyncTime.hour.toString().padLeft(2, '0')}:${nextSyncTime.minute.toString().padLeft(2, '0')}';
+      }
+      
+      // Fallback: Berechne die nächste Sync-Zeit basierend auf letztem Sync + Intervall
+      final lastSyncTime = DateTime.parse(syncStatus.lastSyncTime);
+      final nextSyncTime = lastSyncTime.add(Duration(minutes: config.syncIntervalMinutes));
+      
+      return '${nextSyncTime.day.toString().padLeft(2, '0')}.${nextSyncTime.month.toString().padLeft(2, '0')}.${nextSyncTime.year} ${nextSyncTime.hour.toString().padLeft(2, '0')}:${nextSyncTime.minute.toString().padLeft(2, '0')}';
+    } catch (e) {
+      print('Fehler beim Berechnen der nächsten Sync-Zeit für ${config.name}: $e');
+      return '-';
+    }
+  }
+
+  /// Lädt den SyncStatus für eine beliebige Config
+  Future<SyncStatus?> getSyncStatusForConfig(String configId) async {
+    return await _configService.getLastSyncStatus(configId);
+  }
+
+  /// Starte den Auto-Sync-Timer der regelmäßig überprüft, ob ein Sync notwendig ist
+  void _startAutoSyncTimer() {
+    print('SyncProvider: Starte Auto-Sync-Timer');
+    
+    // Überprüfe alle 30 Sekunden, ob ein Auto-Sync notwendig ist
+    _autoSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
+      await _checkAndPerformAutoSync();
+    });
+  }
+
+  /// Überprüfe ob für die aktuelle Config ein Auto-Sync notwendig ist und führe ihn durch
+  Future<void> _checkAndPerformAutoSync() async {
+    // Wenn bereits ein Sync läuft oder keine Config existiert, skip
+    if (_isLoading || _config == null || !_config!.autoSync) {
+      return;
+    }
+
+    // Wenn noch nie synced wurde, führe sofort den ersten Sync durch
+    if (_syncStatus == null) {
+      print('SyncProvider: Führe initialen Auto-Sync für ${_config!.name} durch');
+      await performSync();
+      return;
+    }
+
+    try {
+      final lastSyncTime = DateTime.parse(_syncStatus!.lastSyncTime);
+      final now = DateTime.now();
+      final elapsedMinutes = now.difference(lastSyncTime).inMinutes;
+
+      // Wenn seit dem letzten Sync genug Zeit vergangen ist, führe neuen Sync durch
+      if (elapsedMinutes >= _config!.syncIntervalMinutes) {
+        print('SyncProvider: Auto-Sync für ${_config!.name} fällig (${elapsedMinutes}min vergangen, Intervall: ${_config!.syncIntervalMinutes}min)');
+        await performSync();
+      }
+    } catch (e) {
+      print('Fehler beim Auto-Sync-Check: $e');
+    }
+  }
 }
+
