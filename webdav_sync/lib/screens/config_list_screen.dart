@@ -255,8 +255,35 @@ class _ConfigListScreenState extends State<ConfigListScreen>
                                   child: FutureBuilder<String>(
                                     future: context.read<SyncProvider>().getNextSyncTimeForConfig(config, syncStatus),
                                     builder: (context, nextSyncSnapshot) {
+                                      final isSchedule = config.syncDaysOfWeek.isNotEmpty;
+                                      final label = isSchedule ? 'Nächster Sync nach Plan:' : 'Nächster Sync:';
+                                      final nextSyncTime = nextSyncSnapshot.data ?? '-';
+                                      
+                                      // Format: "Mi 04.02.2026 15:30" -> Extract day name
+                                      String displayText = nextSyncTime;
+                                      if (isSchedule && nextSyncTime != '-') {
+                                        try {
+                                          final parts = nextSyncTime.split(' ');
+                                          if (parts.length >= 2) {
+                                            // Parse date to get day name
+                                            final dateParts = parts[0].split('.');
+                                            if (dateParts.length == 3) {
+                                              final day = int.parse(dateParts[0]);
+                                              final month = int.parse(dateParts[1]);
+                                              final year = int.parse(dateParts[2]);
+                                              final date = DateTime(year, month, day);
+                                              final dayNames = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
+                                              final dayName = dayNames[date.weekday - 1];
+                                              displayText = '$dayName ${parts[0]} ${parts[1]}';
+                                            }
+                                          }
+                                        } catch (e) {
+                                          // Fallback zu originalem Format
+                                        }
+                                      }
+                                      
                                       return Text(
-                                        'Nächster Sync: ${nextSyncSnapshot.data ?? '-'}',
+                                        '$label $displayText',
                                         style: TextStyle(
                                           fontSize: 11,
                                           color: Colors.grey[700],

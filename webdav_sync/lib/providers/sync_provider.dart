@@ -382,6 +382,11 @@ class SyncProvider extends ChangeNotifier {
     }
 
     try {
+      // Wenn "Nach Plan" (Schedule) aktiviert ist
+      if (config.syncDaysOfWeek.isNotEmpty && config.syncTime.isNotEmpty) {
+        return _getNextScheduledSyncTime(config);
+      }
+
       // Nutze die gespeicherte nextScheduledSyncTime falls vorhanden
       if (syncStatus.nextScheduledSyncTime != null) {
         final nextSyncTime = DateTime.parse(syncStatus.nextScheduledSyncTime!);
@@ -397,6 +402,36 @@ class SyncProvider extends ChangeNotifier {
       print('Fehler beim Berechnen der nächsten Sync-Zeit für ${config.name}: $e');
       return '-';
     }
+  }
+
+  /// Berechnet die nächste geplante Sync-Zeit basierend auf Wochentagen und Uhrzeit
+  String _getNextScheduledSyncTime(SyncConfig config) {
+    final timeParts = config.syncTime.split(':');
+    final scheduledHour = int.tryParse(timeParts[0]) ?? 9;
+    final scheduledMinute = int.tryParse(timeParts.length > 1 ? timeParts[1] : '0') ?? 0;
+    
+    // Starte mit heute
+    DateTime nextSync = DateTime.now();
+    nextSync = DateTime(nextSync.year, nextSync.month, nextSync.day, scheduledHour, scheduledMinute);
+    
+    // Wenn die Zeit heute schon vorbei ist, starte mit morgen
+    if (nextSync.isBefore(DateTime.now())) {
+      nextSync = nextSync.add(const Duration(days: 1));
+    }
+    
+    // Finde den nächsten Tag, der in der syncDaysOfWeek-Liste ist
+    // Dart: 1=Montag, ..., 7=Sonntag
+    // DateTime: 1=Montag, ..., 7=Sonntag
+    int maxAttempts = 7; // Maximal 7 Tage durchsuchen
+    while (maxAttempts > 0) {
+      if (config.syncDaysOfWeek.contains(nextSync.weekday)) {
+        break;
+      }
+      nextSync = nextSync.add(const Duration(days: 1));
+      maxAttempts--;
+    }
+    
+    return '${nextSync.day.toString().padLeft(2, '0')}.${nextSync.month.toString().padLeft(2, '0')}.${nextSync.year} ${nextSync.hour.toString().padLeft(2, '0')}:${nextSync.minute.toString().padLeft(2, '0')}';
   }
 
   /// Lädt den SyncStatus für eine beliebige Config

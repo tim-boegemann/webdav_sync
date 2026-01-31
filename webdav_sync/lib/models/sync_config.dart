@@ -8,6 +8,8 @@ class SyncConfig {
   final String localFolder;
   final int syncIntervalMinutes;
   final bool autoSync;
+  final List<int> syncDaysOfWeek; // 1=Monday, 7=Sunday
+  final String syncTime; // Format: "HH:mm"
 
   SyncConfig({
     String? id,
@@ -19,6 +21,8 @@ class SyncConfig {
     required this.localFolder,
     this.syncIntervalMinutes = 15,
     this.autoSync = false,
+    this.syncDaysOfWeek = const [],
+    this.syncTime = '09:00',
   }) : id = id ?? DateTime.now().millisecondsSinceEpoch.toString();
 
   Map<String, dynamic> toMap() {
@@ -32,6 +36,8 @@ class SyncConfig {
       'localFolder': localFolder,
       'syncIntervalMinutes': syncIntervalMinutes,
       'autoSync': autoSync,
+      'syncDaysOfWeek': syncDaysOfWeek,
+      'syncTime': syncTime,
     };
   }
 
@@ -46,6 +52,8 @@ class SyncConfig {
       localFolder: map['localFolder'] ?? '',
       syncIntervalMinutes: map['syncIntervalMinutes'] ?? 15,
       autoSync: map['autoSync'] ?? false,
+      syncDaysOfWeek: List<int>.from(map['syncDaysOfWeek'] as List? ?? []),
+      syncTime: map['syncTime'] ?? '09:00',
     );
   }
 }

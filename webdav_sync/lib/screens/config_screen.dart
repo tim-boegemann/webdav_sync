@@ -5,6 +5,7 @@ import '../models/sync_config.dart';
 import '../providers/sync_provider.dart';
 import '../services/path_provider_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/custom_time_picker.dart';
 
 class ConfigScreen extends StatefulWidget {
   final SyncConfig? configToEdit;
@@ -27,6 +28,9 @@ class _ConfigScreenState extends State<ConfigScreen> {
   bool _showPassword = false;
   String? _lastError;
   bool _isNewConfig = false;
+  String _syncIntervalOption = 'hourly'; // hourly, daily, weekly, custom, schedule
+  List<bool> _selectedDays = [false, false, false, false, false, false, false]; // Mon-Sun
+  TimeOfDay _selectedTime = const TimeOfDay(hour: 9, minute: 0);
 
   @override
   void initState() {
@@ -44,6 +48,44 @@ class _ConfigScreenState extends State<ConfigScreen> {
     _syncIntervalController =
         TextEditingController(text: (config?.syncIntervalMinutes ?? 15).toString());
     _autoSync = config?.autoSync ?? false;
+    
+    // Initialisiere Wochentage
+    if (config?.syncDaysOfWeek.isNotEmpty ?? false) {
+      _selectedDays = [false, false, false, false, false, false, false];
+      for (int day in config!.syncDaysOfWeek) {
+        if (day >= 1 && day <= 7) {
+          _selectedDays[day - 1] = true;
+        }
+      }
+    }
+    
+    // Initialisiere Uhrzeit
+    if (config?.syncTime.isNotEmpty ?? false) {
+      final timeParts = config!.syncTime.split(':');
+      if (timeParts.length == 2) {
+        _selectedTime = TimeOfDay(
+          hour: int.tryParse(timeParts[0]) ?? 9,
+          minute: int.tryParse(timeParts[1]) ?? 0,
+        );
+      }
+    }
+    
+    // Bestimme die Sync-Interval-Option basierend auf dem Wert
+    // Priorität: schedule > hourly/daily/weekly > custom
+    if (config?.syncDaysOfWeek.isNotEmpty ?? false) {
+      _syncIntervalOption = 'schedule';
+    } else {
+      final interval = config?.syncIntervalMinutes ?? 60;
+      if (interval == 60) {
+        _syncIntervalOption = 'hourly';
+      } else if (interval == 1440) {
+        _syncIntervalOption = 'daily';
+      } else if (interval == 10080) {
+        _syncIntervalOption = 'weekly';
+      } else {
+        _syncIntervalOption = 'custom';
+      }
+    }
     
     // Initialisiere Default-Pfad wenn leer
     if (_localFolderController.text.isEmpty) {
@@ -80,6 +122,13 @@ class _ConfigScreenState extends State<ConfigScreen> {
         localFolder: _localFolderController.text,
         syncIntervalMinutes: int.tryParse(_syncIntervalController.text) ?? 15,
         autoSync: _autoSync,
+        syncDaysOfWeek: _selectedDays
+            .asMap()
+            .entries
+            .where((e) => e.value)
+            .map((e) => e.key + 1)
+            .toList(),
+        syncTime: '${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}',
       );
 
       context.read<SyncProvider>().saveConfig(config);
@@ -409,16 +458,128 @@ class _ConfigScreenState extends State<ConfigScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    TextField(
-                      controller: _syncIntervalController,
-                      keyboardType: TextInputType.number,
+                    DropdownButtonFormField<String>(
+                      value: _syncIntervalOption,
                       decoration: InputDecoration(
-                        labelText: 'Sync Interval (minutes)',
+                        labelText: 'Sync Interval',
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
+                      items: const [
+                        DropdownMenuItem(value: 'hourly', child: Text('Stündlich (60 Min)')),
+                        DropdownMenuItem(value: 'daily', child: Text('Täglich (1440 Min)')),
+                        DropdownMenuItem(value: 'weekly', child: Text('Wöchentlich (10080 Min)')),
+                        DropdownMenuItem(value: 'schedule', child: Text('Nach Plan (Wochentage + Uhrzeit)')),
+                        DropdownMenuItem(value: 'custom', child: Text('Benutzer definiert')),
+                      ],
+                      onChanged: (value) {
+                        setState(() {
+                          _syncIntervalOption = value ?? 'hourly';
+                          // Update den Controller basierend auf Auswahl
+                          if (value == 'hourly') {
+                            _syncIntervalController.text = '60';
+                          } else if (value == 'daily') {
+                            _syncIntervalController.text = '1440';
+                          } else if (value == 'weekly') {
+                            _syncIntervalController.text = '10080';
+                          }
+                        });
+                      },
                     ),
+                    const SizedBox(height: 12),
+                    if (_syncIntervalOption == 'custom')
+                      TextField(
+                        controller: _syncIntervalController,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: 'Sync Interval (Minuten)',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                    if (_syncIntervalOption == 'schedule') ...[
+                      Text(
+                        'Wähle die Wochentage:',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.grey[700],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'
+                        ].asMap().entries.map((entry) {
+                          final index = entry.key;
+                          final dayName = entry.value;
+                          return FilterChip(
+                            label: Text(dayName),
+                            selected: _selectedDays[index],
+                            onSelected: (selected) {
+                              setState(() => _selectedDays[index] = selected);
+                            },
+                            side: _selectedDays[index]
+                                ? BorderSide.none
+                                : BorderSide(
+                                    color: Colors.grey[300]!,
+                                    width: 0.5,
+                                  ),
+                            backgroundColor: Colors.transparent,
+                            selectedColor: AppColors.primaryButtonBackground,
+                            labelStyle: TextStyle(
+                              color: _selectedDays[index] ? Colors.white : Colors.black87,
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Sync Uhrzeit:',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                    color: Colors.grey[700],
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  '${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}',
+                                  style: const TextStyle(
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          ElevatedButton.icon(
+                            onPressed: () async {
+                              final TimeOfDay? picked = await showDialog<TimeOfDay>(
+                                context: context,
+                                builder: (context) => CustomTimePicker(
+                                  initialTime: _selectedTime,
+                                ),
+                              );
+                              if (picked != null && picked != _selectedTime) {
+                                setState(() => _selectedTime = picked);
+                              }
+                            },
+                            icon: const Icon(Icons.schedule),
+                            label: const Text('Uhrzeit ändern'),
+                          ),
+                        ],
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     CheckboxListTile(
                       title: const Text('Enable Auto-Sync'),
