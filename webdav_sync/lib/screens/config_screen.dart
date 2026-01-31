@@ -28,9 +28,9 @@ class _ConfigScreenState extends State<ConfigScreen> {
   bool _showPassword = false;
   String? _lastError;
   bool _isNewConfig = false;
-  String _syncIntervalOption = 'hourly'; // hourly, daily, weekly, custom, schedule
-  List<bool> _selectedDays = [false, false, false, false, false, false, false]; // Mon-Sun
-  TimeOfDay _selectedTime = const TimeOfDay(hour: 9, minute: 0);
+  String _syncIntervalOption = 'schedule'; // hourly, daily, weekly, custom, schedule
+  List<bool> _selectedDays = [true, true, true, true, true, false, false]; // Mo-Fr default
+  TimeOfDay _selectedTime = const TimeOfDay(hour: 14, minute: 0);
 
   @override
   void initState() {
@@ -49,41 +49,50 @@ class _ConfigScreenState extends State<ConfigScreen> {
         TextEditingController(text: (config?.syncIntervalMinutes ?? 15).toString());
     _autoSync = config?.autoSync ?? false;
     
-    // Initialisiere Wochentage
-    if (config?.syncDaysOfWeek.isNotEmpty ?? false) {
-      _selectedDays = [false, false, false, false, false, false, false];
-      for (int day in config!.syncDaysOfWeek) {
-        if (day >= 1 && day <= 7) {
-          _selectedDays[day - 1] = true;
+    // Für neue Konfigurationen: Setze Standardwerte
+    if (config == null) {
+      _selectedDays = [true, true, true, true, true, false, false]; // Mo-Fr default
+      _selectedTime = const TimeOfDay(hour: 14, minute: 0);
+      _syncIntervalOption = 'schedule';
+      _autoSync = false; // Wird optional mit dem Checkbox gesetzt
+    } else {
+      // Für bestehende Konfigurationen: Lade die gespeicherten Werte
+      // Initialisiere Wochentage
+      if (config.syncDaysOfWeek.isNotEmpty) {
+        _selectedDays = [false, false, false, false, false, false, false];
+        for (int day in config.syncDaysOfWeek) {
+          if (day >= 1 && day <= 7) {
+            _selectedDays[day - 1] = true;
+          }
         }
       }
-    }
-    
-    // Initialisiere Uhrzeit
-    if (config?.syncTime.isNotEmpty ?? false) {
-      final timeParts = config!.syncTime.split(':');
-      if (timeParts.length == 2) {
-        _selectedTime = TimeOfDay(
-          hour: int.tryParse(timeParts[0]) ?? 9,
-          minute: int.tryParse(timeParts[1]) ?? 0,
-        );
+      
+      // Initialisiere Uhrzeit
+      if (config.syncTime.isNotEmpty) {
+        final timeParts = config.syncTime.split(':');
+        if (timeParts.length == 2) {
+          _selectedTime = TimeOfDay(
+            hour: int.tryParse(timeParts[0]) ?? 9,
+            minute: int.tryParse(timeParts[1]) ?? 0,
+          );
+        }
       }
-    }
-    
-    // Bestimme die Sync-Interval-Option basierend auf dem Wert
-    // Priorität: schedule > hourly/daily/weekly > custom
-    if (config?.syncDaysOfWeek.isNotEmpty ?? false) {
-      _syncIntervalOption = 'schedule';
-    } else {
-      final interval = config?.syncIntervalMinutes ?? 60;
-      if (interval == 60) {
-        _syncIntervalOption = 'hourly';
-      } else if (interval == 1440) {
-        _syncIntervalOption = 'daily';
-      } else if (interval == 10080) {
-        _syncIntervalOption = 'weekly';
+      
+      // Bestimme die Sync-Interval-Option basierend auf dem Wert
+      // Priorität: schedule > hourly/daily/weekly > custom
+      if (config.syncDaysOfWeek.isNotEmpty) {
+        _syncIntervalOption = 'schedule';
       } else {
-        _syncIntervalOption = 'custom';
+        final interval = config.syncIntervalMinutes;
+        if (interval == 60) {
+          _syncIntervalOption = 'hourly';
+        } else if (interval == 1440) {
+          _syncIntervalOption = 'daily';
+        } else if (interval == 10080) {
+          _syncIntervalOption = 'weekly';
+        } else {
+          _syncIntervalOption = 'custom';
+        }
       }
     }
     
