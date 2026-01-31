@@ -61,6 +61,7 @@ dependencies:
   
   # File picker for directory selection
   file_picker: ^8.0.0
+  logger: ^2.6.2
 
 dev_dependencies:
   flutter_test:

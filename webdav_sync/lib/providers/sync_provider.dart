@@ -6,6 +6,7 @@ import '../services/webdav_sync_service.dart';
 import '../services/config_service.dart';
 import '../services/path_provider_service.dart';
 import '../services/shortcuts_handler.dart';
+import '../utils/logger.dart';
 
 class SyncProvider extends ChangeNotifier {
   final WebdavSyncService _syncService = WebdavSyncService();
@@ -56,7 +57,7 @@ class SyncProvider extends ChangeNotifier {
 
   /// Handle Shortcuts-Befehle von iOS App Intents
   Future<void> _handleShortcutCommand(String command, Map<String, String> params) async {
-    print('SyncProvider: Handle Shortcut Command - $command');
+    logger.i('Handle Shortcut Command - $command');
     
     final cmd = parseShortcutCommand(command);
     
@@ -80,66 +81,66 @@ class SyncProvider extends ChangeNotifier {
 
   /// Synchronisiere alle Konfigurationen nacheinander
   Future<void> _syncAllConfigs() async {
-    print('SyncProvider: Synchronisiere alle ${_allConfigs.length} Konfigurationen');
+    logger.i('Synchronisiere alle ${_allConfigs.length} Konfigurationen');
     
     for (final config in _allConfigs) {
       await setCurrentConfig(config);
       await performSync();
-      print('SyncProvider: Sync für "${config.name}" abgeschlossen');
+      logger.i('Sync für "${config.name}" abgeschlossen');
     }
     
-    print('SyncProvider: Alle Synchronisierungen abgeschlossen');
+    logger.i('Alle Synchronisierungen abgeschlossen');
   }
 
   /// Synchronisiere eine spezifische Konfiguration nach Name
   Future<void> _syncConfigByName(String configName) async {
     try {
       final config = _allConfigs.firstWhere((c) => c.name == configName);
-      print('SyncProvider: Synchronisiere Config: $configName');
+      logger.i('Synchronisiere Config: $configName');
       
       await setCurrentConfig(config);
       await performSync();
       
-      print('SyncProvider: Sync für "$configName" abgeschlossen');
+      logger.i('Sync für "$configName" abgeschlossen');
     } catch (e) {
-      print('SyncProvider: Fehler bei Sync für $configName: $e');
+      logger.e('Fehler bei Sync für $configName', error: e);
     }
   }
 
   /// Gebe aktuellen Sync-Status aus
   void _printSyncStatus() {
-    print('=== WebDAV Sync Status ===');
-    print('Aktuelle Config: ${_config?.name ?? "Keine"}');
-    print('Syncing: $_isLoading');
-    print('Status: ${_syncStatus?.status ?? "Kein Status"}');
-    print('Letzer Sync: ${_syncStatus?.lastSyncTime ?? "Nie"}');
-    print('Files Synced: ${_syncStatus?.filesSync ?? 0}');
+    logger.i('=== WebDAV Sync Status ===');
+    logger.i('Aktuelle Config: ${_config?.name ?? "Keine"}');
+    logger.i('Syncing: $_isLoading');
+    logger.i('Status: ${_syncStatus?.status ?? "Kein Status"}');
+    logger.i('Letzer Sync: ${_syncStatus?.lastSyncTime ?? "Nie"}');
+    logger.i('Files Synced: ${_syncStatus?.filesSync ?? 0}');
     if (_syncStatus?.error != null) {
-      print('Error: ${_syncStatus?.error}');
+      logger.e('Error: ${_syncStatus?.error}');
     }
-    print('===========================');
+    logger.i('===========================');
   }
 
   /// Handle Background Fetch von iOS
   Future<bool> _handleBackgroundFetch() async {
     try {
-      print('SyncProvider: Background Fetch - Starte Synchronisierung aller Configs');
+      logger.i('Background Fetch - Starte Synchronisierung aller Configs');
       
       // Lade aktuelle Configs
       await _loadConfigs();
       
       // Synchronisiere alle Configs
       if (_allConfigs.isEmpty) {
-        print('SyncProvider: Keine Configs zum Synchronisieren vorhanden');
+        logger.w('Keine Configs zum Synchronisieren vorhanden');
         return false;
       }
       
       await _syncAllConfigs();
       
-      print('SyncProvider: Background Fetch - Alle Syncs abgeschlossen');
+      logger.i('Background Fetch - Alle Syncs abgeschlossen');
       return true;
     } catch (e) {
-      print('SyncProvider: Background Fetch Fehler - $e');
+      logger.e('Background Fetch Fehler', error: e);
       return false;
     }
   }
@@ -205,7 +206,7 @@ class SyncProvider extends ChangeNotifier {
         notifyListeners();
       }
     } catch (e) {
-      print('Fehler beim Laden der Config mit ID $configId: $e');
+      logger.e('Fehler beim Laden der Config mit ID $configId', error: e);
     }
   }
 
@@ -227,7 +228,7 @@ class SyncProvider extends ChangeNotifier {
       _syncStatus = await _configService.getLastSyncStatus(config.id);
     } else {
       // Wenn ein Sync läuft, aktualisiere nur die Config in der Liste
-      print('SyncProvider: Sync läuft noch, aktualisiere nur die Config in der Liste');
+      logger.i('Sync läuft noch, aktualisiere nur die Config in der Liste');
       // Die aktuelle Config bleibt erhalten bis der Sync abgeschlossen ist
     }
     
@@ -304,7 +305,7 @@ class SyncProvider extends ChangeNotifier {
           nextScheduledSyncTime: nextSyncTime.toIso8601String(),
         );
       } catch (e) {
-        print('Fehler beim Berechnen der nächsten Sync-Zeit: $e');
+        logger.e('Fehler beim Berechnen der nächsten Sync-Zeit: $e', error: e);
       }
     }
     
@@ -317,7 +318,7 @@ class SyncProvider extends ChangeNotifier {
 
   /// Bricht den aktuellen Sync-Vorgang ab
   void cancelSync() {
-    print('Sync-Abbruch angefordert');
+    logger.i('Sync-Abbruch angefordert');
     _syncService.cancelSync();
     _isLoading = false;
     notifyListeners();
@@ -403,7 +404,7 @@ class SyncProvider extends ChangeNotifier {
       
       return '${nextSyncTime.day.toString().padLeft(2, '0')}.${nextSyncTime.month.toString().padLeft(2, '0')}.${nextSyncTime.year} ${nextSyncTime.hour.toString().padLeft(2, '0')}:${nextSyncTime.minute.toString().padLeft(2, '0')}';
     } catch (e) {
-      print('Fehler beim Berechnen der nächsten Sync-Zeit: $e');
+      logger.e('Fehler beim Berechnen der nächsten Sync-Zeit: $e', error: e);
       return '-';
     }
   }
@@ -432,7 +433,7 @@ class SyncProvider extends ChangeNotifier {
       
       return '${nextSyncTime.day.toString().padLeft(2, '0')}.${nextSyncTime.month.toString().padLeft(2, '0')}.${nextSyncTime.year} ${nextSyncTime.hour.toString().padLeft(2, '0')}:${nextSyncTime.minute.toString().padLeft(2, '0')}';
     } catch (e) {
-      print('Fehler beim Berechnen der nächsten Sync-Zeit für ${config.name}: $e');
+      logger.e('Fehler beim Berechnen der nächsten Sync-Zeit für ${config.name}: $e', error: e);
       return '-';
     }
   }
@@ -474,7 +475,7 @@ class SyncProvider extends ChangeNotifier {
 
   /// Starte den Auto-Sync-Timer der regelmäßig überprüft, ob ein Sync notwendig ist
   void _startAutoSyncTimer() {
-    print('SyncProvider: Starte Auto-Sync-Timer');
+    logger.i('SyncProvider: Starte Auto-Sync-Timer');
     
     // Überprüfe alle 30 Sekunden, ob ein Auto-Sync notwendig ist
     _autoSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
@@ -501,7 +502,7 @@ class SyncProvider extends ChangeNotifier {
 
         // Wenn noch nie synced wurde, führe sofort den ersten Sync durch
         if (syncStatus == null) {
-          print('SyncProvider: Führe initialen Auto-Sync für ${config.name} durch');
+          logger.i('SyncProvider: Führe initialen Auto-Sync für ${config.name} durch');
           await setCurrentConfig(config);
           await performSync();
           continue;
@@ -515,15 +516,15 @@ class SyncProvider extends ChangeNotifier {
 
           // Wenn seit dem letzten Sync genug Zeit vergangen ist, führe neuen Sync durch
           if (elapsedMinutes >= config.syncIntervalMinutes) {
-            print('SyncProvider: Auto-Sync für ${config.name} fällig (${elapsedMinutes}min vergangen, Intervall: ${config.syncIntervalMinutes}min)');
+            logger.i('SyncProvider: Auto-Sync für ${config.name} fällig (${elapsedMinutes}min vergangen, Intervall: ${config.syncIntervalMinutes}min)');
             await setCurrentConfig(config);
             await performSync();
           }
         } catch (e) {
-          print('Fehler beim Berechnen der verstrichenen Zeit für ${config.name}: $e');
+          logger.e('Fehler beim Berechnen der verstrichenen Zeit für ${config.name}: $e', error: e);
         }
       } catch (e) {
-        print('Fehler beim Auto-Sync-Check für ${config.name}: $e');
+        logger.e('Fehler beim Auto-Sync-Check für ${config.name}: $e', error: e);
       }
     }
   }

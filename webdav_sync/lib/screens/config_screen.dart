@@ -528,7 +528,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: _syncIntervalOption,
+                      initialValue: _syncIntervalOption,
                       decoration: InputDecoration(
                         labelText: 'Sync Interval',
                         border: OutlineInputBorder(
@@ -756,7 +756,7 @@ class _FolderNavigatorDialogState extends State<_FolderNavigatorDialog> {
       return '/';
     }
     
-    return '/' + segments.join(' > ');
+    return '/${segments.join(' > ')}';
   }
 
   @override

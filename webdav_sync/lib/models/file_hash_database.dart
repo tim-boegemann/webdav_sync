@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:path/path.dart' as path;
+import '../utils/logger.dart';
 
 /// Speichert und verwaltet die Hash-Datenbank für synchronisierte Dateien
 class FileHashDatabase {
@@ -27,13 +28,13 @@ class FileHashDatabase {
         final content = await file.readAsString();
         final json = jsonDecode(content) as Map<String, dynamic>;
         _hashes = Map<String, String>.from(json['hashes'] ?? {});
-        print('Hash-Datenbank geladen: ${_hashes.length} Einträge');
+        logger.d('Hash-Datenbank geladen: ${_hashes.length} Einträge');
       } else {
-        print('Keine Hash-Datenbank gefunden, starte mit leerer Datenbank');
+        logger.d('Keine Hash-Datenbank gefunden, starte mit leerer Datenbank');
         _hashes = {};
       }
     } catch (e) {
-      print('Fehler beim Laden der Hash-Datenbank: $e');
+      logger.e('Fehler beim Laden der Hash-Datenbank: $e', error: e);
       _hashes = {};
     }
   }
@@ -58,10 +59,10 @@ class FileHashDatabase {
       };
 
       await file.writeAsString(jsonEncode(json), flush: true);
-      print('Hash-Datenbank gespeichert: ${_hashes.length} Einträge');
+      logger.d('Hash-Datenbank gespeichert: ${_hashes.length} Einträge');
       _isDirty = false;
     } catch (e) {
-      print('Fehler beim Speichern der Hash-Datenbank: $e');
+      logger.e('Fehler beim Speichern der Hash-Datenbank: $e', error: e);
     }
   }
 

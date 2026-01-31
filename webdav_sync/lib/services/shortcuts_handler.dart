@@ -1,4 +1,5 @@
 import 'package:flutter/services.dart';
+import '../utils/logger.dart';
 
 /// Handler für App Intents auf iOS
 class ShortcutsHandler {
@@ -19,18 +20,18 @@ class ShortcutsHandler {
           final command = args['command'] as String? ?? '';
           final params = Map<String, String>.from(args['params'] ?? {});
           
-          print('Shortcuts: Empfangener Befehl - $command mit Parametern: $params');
+          logger.i('Shortcuts: Empfangener Befehl - $command mit Parametern: $params');
           
           // Rufe den Callback auf
           onShortcutCommand?.call(command, params);
           return null;
         } else if (call.method == 'handleBackgroundFetch') {
-          print('Background Fetch: Starte Synchronisierung im Hintergrund');
+          logger.i('Background Fetch: Starte Synchronisierung im Hintergrund');
           
           // Rufe Background Fetch Handler auf
           final success = await onBackgroundFetch?.call() ?? false;
           
-          print('Background Fetch: Synchronisierung ${success ? 'erfolgreich' : 'fehlgeschlagen'}');
+          logger.i('Background Fetch: Synchronisierung ${success ? 'erfolgreich' : 'fehlgeschlagen'}');
           
           return {
             'success': success,
@@ -38,7 +39,7 @@ class ShortcutsHandler {
           };
         }
       } catch (e) {
-        print('ShortcutsHandler Fehler: $e');
+        logger.e('ShortcutsHandler Fehler', error: e);
       }
       return null;
     });

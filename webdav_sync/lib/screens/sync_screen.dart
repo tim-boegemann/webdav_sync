@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/sync_provider.dart';
 import '../theme/app_colors.dart';
+import '../utils/logger.dart';
 import 'config_screen.dart';
 
 class SyncScreen extends StatefulWidget {
@@ -35,42 +36,45 @@ class _SyncScreenState extends State<SyncScreen> {
           icon: const Icon(Icons.arrow_back),
           onPressed: () async {
             try {
+              final nav = Navigator.of(context);
+              final provider = context.read<SyncProvider>();
               // Wenn noch ein Sync läuft, breche ihn ab bevor wir zurücknavigieren
-              if (context.read<SyncProvider>().isLoading) {
-                context.read<SyncProvider>().cancelSync();
+              if (provider.isLoading) {
+                provider.cancelSync();
               }
               
               // Warte kurz, damit der Provider aktualisiert wird
               await Future.delayed(const Duration(milliseconds: 100));
               
               if (mounted) {
-                Navigator.of(context).pop();
+                nav.pop();
               }
             } catch (e) {
-              print('Fehler beim Zurücknavigieren: $e');
+              logger.e('Fehler beim Zurücknavigieren: $e', error: e);
               if (mounted) {
-                Navigator.of(context).pop();
+                final nav = Navigator.of(context);
+                nav.pop();
               }
             }
           },
         ),
       ),
-      body: FutureBuilder<void>(
-        future: Future.microtask(() {
+      body: Consumer<SyncProvider>(
+        builder: (context, syncProvider, _) {
           // Lade die Config für diese ID wenn noch nicht geladen
-          if (context.read<SyncProvider>().config?.id != widget.configId) {
-            context.read<SyncProvider>().loadConfigById(widget.configId);
+          if (syncProvider.config?.id != widget.configId && !syncProvider.isLoading) {
+            // Starte das Laden async, aber lese Provider synchron vor dem Build
+            Future.microtask(() {
+              syncProvider.loadConfigById(widget.configId);
+            });
           }
-        }),
-        builder: (context, snapshot) {
-          return Consumer<SyncProvider>(
-            builder: (context, syncProvider, _) {
-              // Wenn die falsche Config geladen ist, warte
-              if (syncProvider.config?.id != widget.configId) {
-                return const Center(
-                  child: CircularProgressIndicator(),
-                );
-              }
+          
+          // Wenn die falsche Config geladen ist, warte
+          if (syncProvider.config?.id != widget.configId) {
+            return const Center(
+              child: CircularProgressIndicator(),
+            );
+          }
 
               if (syncProvider.config == null) {
                 return Center(
@@ -328,11 +332,8 @@ class _SyncScreenState extends State<SyncScreen> {
             ),
           );
         },
-      );
-        },
-      ),
-    );
-  }
+      ),);
+    }
 
   Widget _buildInfoRow(String label, String value) {
     return Padding(

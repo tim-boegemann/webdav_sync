@@ -8,6 +8,7 @@ import 'package:xml/xml.dart';
 import 'package:path/path.dart' as path;
 import '../models/sync_config.dart';
 import '../models/sync_status.dart';
+import '../utils/logger.dart';
 import '../models/file_hash_database.dart';
 
 class WebdavSyncService {
@@ -48,7 +49,7 @@ class WebdavSyncService {
     // Akzeptiere Self-Signed Zertifikate (für Entwicklung/private Server)
     // WARNUNG: Dies ist unsicher für Produktionsumgebungen!
     httpClient.badCertificateCallback = (X509Certificate cert, String host, int port) {
-      print('Zertifikatwarnung: Akzeptiere Zertifikat für $host:$port');
+      logger.w('Zertifikatwarnung: Akzeptiere Zertifikat für $host:$port');
       return true;
     };
     
@@ -148,7 +149,7 @@ class WebdavSyncService {
       final files = await _listRemoteFilesRecursive(_config!.remoteFolder);
       final totalFiles = files.length;
       
-      print('📊 SYNC PROGRESS: Total files to sync: $totalFiles');
+      logger.i('📋 SYNC PROGRESS: Total files to sync: $totalFiles');
       
       // Extrahiere den Namen des Remote-Ordners um ihn lokal zu erstellen
       // z.B. wenn remoteFolder = "/remote/path/Documents" dann folderName = "Documents"
@@ -158,16 +159,16 @@ class WebdavSyncService {
           .toList()
           .last;
       
-      print('📂 Remote folder name: $remoteFolderName');
+      logger.i('📂 Remote folder name: $remoteFolderName');
       
       // Informiere über Gesamtzahl
       onProgressUpdate?.call(0, totalFiles);
-      print('✓ Called onProgressUpdate(0, $totalFiles)');
+      logger.i('✓ Called onProgressUpdate(0, $totalFiles)');
 
       for (var file in files) {
         // Überprüfe ob Sync abgebrochen wurde
         if (_isCancelled) {
-          print('Sync wurde vom Benutzer abgebrochen');
+          logger.i('Sync wurde vom Benutzer abgebrochen');
           final duration = DateTime.now().difference(startTime);
           return SyncStatus(
             issyncing: false,
@@ -187,7 +188,7 @@ class WebdavSyncService {
           final localFileDir = path.dirname(localPath);
           final dir = Directory(localFileDir);
           if (!dir.existsSync()) {
-            print('📁 Erstelle Ordner: $localFileDir');
+            logger.i('📁 Erstelle Ordner: $localFileDir');
             dir.createSync(recursive: true);
           }
 
@@ -201,16 +202,16 @@ class WebdavSyncService {
           
           if (oldHash != null && oldHash == remoteHash && localFileExists) {
             // Datei hat nicht geändert und existiert lokal - überspringe Download
-            print('✓ Übersprungen (unverändert): $relativePath');
+            logger.i('✓ Übersprungen (un verändert): $relativePath');
             filesSkipped++;
           } else {
             // Datei ist neu, hat sich geändert, oder lokale Datei wurde gelöscht - lade herunter
             if (oldHash != null && oldHash == remoteHash && !localFileExists) {
-              print('↓ Lade erneut herunter (lokale Datei fehlend): $relativePath');
+              logger.i('↓ Lade erneut herunter (lokale Datei fehlend): $relativePath');
             } else if (oldHash != null) {
-              print('⟳ Aktualisiere (Hash geändert): $relativePath');
+              logger.i('↳ Aktualisiere (Hash geändert): $relativePath');
             } else {
-              print('↓ Lade herunter: $relativePath');
+              logger.i('↓ Lade herunter: $relativePath');
             }
             
             await _downloadFile(file, localPath);
@@ -223,7 +224,7 @@ class WebdavSyncService {
           // Update progress
           onProgressUpdate?.call(filesDownloaded + filesSkipped, totalFiles);
         } catch (e) {
-          print('Fehler beim Synchronisieren von $file: $e');
+          logger.e('Fehler beim Synchronisieren von $file', error: e);
           // Ignore individual file errors and continue
           filesSkipped++;
           onProgressUpdate?.call(filesDownloaded + filesSkipped, totalFiles);
@@ -282,16 +283,16 @@ class WebdavSyncService {
       
       final auth = _buildAuthHeader();
 
-      print('==== REMOTE FOLDER LISTING AT $baseUrl ====');
-      print('Base URL: $baseUrl');
-      print('Auth Header: ${auth.substring(0, 20)}...');
+      logger.i('==== REMOTE FOLDER LISTING AT $baseUrl ====');
+      logger.i('Base URL: $baseUrl');
+      logger.i('Auth Header: ${auth.substring(0, 20)}...');
 
       final request = http.Request('PROPFIND', Uri.parse(baseUrl))
         ..headers['Authorization'] = auth
         ..headers['Depth'] = '1'
         ..headers['Content-Type'] = 'application/xml';
 
-      print('Sending PROPFIND request with Depth: 1');
+      logger.i('Sending PROPFIND request with Depth: 1');
 
       final streamedResponse = await _httpClient
           .send(request)
@@ -302,23 +303,23 @@ class WebdavSyncService {
 
       final response = await http.Response.fromStream(streamedResponse);
 
-      print('Response Status Code: ${response.statusCode}');
-      print('Response Headers: ${response.headers}');
-      print('Response Body Length: ${response.body.length} bytes');
+      logger.d('Response Status Code: ${response.statusCode}');
+      logger.d('Response Headers: ${response.headers}');
+      logger.d('Response Body Length: ${response.body.length} bytes');
 
       if (response.statusCode == 207) {
         final body = response.body;
-        print('===== FULL RESPONSE BODY =====');
-        print(body);
-        print('===== END RESPONSE BODY =====');
+        logger.d('===== FULL RESPONSE BODY =====');
+        logger.d(body);
+        logger.d('===== END RESPONSE BODY =====');
         
         try {
           final document = XmlDocument.parse(body);
           final List<Map<String, dynamic>> folders = [];
 
           final root = document.rootElement;
-          print('Root Element Tag: ${root.name.qualified}');
-          print('Root Element Local: ${root.name.local}');
+          logger.d('Root Element Tag: ${root.name.qualified}');
+          logger.d('Root Element Local: ${root.name.local}');
           
           // Iteriere durch alle response-Elemente
           final allResponses = root.children
@@ -326,11 +327,11 @@ class WebdavSyncService {
               .where((e) => e.name.local == 'response')
               .toList();
           
-          print('Total <response> elements found: ${allResponses.length}');
+          logger.d('Total <response> elements found: ${allResponses.length}');
 
           for (var i = 0; i < allResponses.length; i++) {
             final element = allResponses[i];
-            print('\n--- Processing response [$i] ---');
+            logger.d('\n--- Processing response [$i] ---');
             try {
               // Suche href-Element
               final hrefElement = element.findElements('href').firstOrNull ??
@@ -339,7 +340,7 @@ class WebdavSyncService {
                       .firstWhere((e) => e.name.local == 'href', orElse: () => throw 'No href found');
               
               final href = hrefElement.innerText;
-              print('  href: "$href"');
+              logger.d('  href: "$href"');
               
               // Suche displayname
               XmlElement? displayNameElement;
@@ -354,11 +355,11 @@ class WebdavSyncService {
                     .whereType<XmlElement>()
                     .firstWhere((e) => e.name.local == 'displayname');
               } catch (e) {
-                print('  displayname search error: $e');
+                logger.d('  displayname search error: $e');
               }
               
               final displayName = displayNameElement?.innerText ?? '';
-              print('  displayName: "$displayName"');
+              logger.d('  displayName: "$displayName"');
               
               // Suche resourcetype
               XmlElement? resourcetypeElement;
@@ -374,14 +375,14 @@ class WebdavSyncService {
                     .whereType<XmlElement>()
                     .firstWhere((e) => e.name.local == 'resourcetype');
               } catch (e) {
-                print('  resourcetype search error: $e');
+                logger.d('  resourcetype search error: $e');
               }
               
               final isCollection = resourcetypeElement?.children
                   .whereType<XmlElement>()
                   .any((e) => e.name.local == 'collection') ?? false;
               
-              print('  isCollection: $isCollection');
+              logger.d('  isCollection: $isCollection');
 
               // Nur Ordner hinzufügen, nicht die Basis-URL selbst
               if (isCollection && href.isNotEmpty) {
@@ -390,64 +391,64 @@ class WebdavSyncService {
                 final cleanHref = decodedHref.replaceAll(RegExp(r'/$'), '');
                 final isSelf = cleanHref == baseUrl.replaceAll(RegExp(r'/$'), '');
                 
-                print('  Original href: "$href"');
-                print('  Decoded href: "$decodedHref"');
-                print('  cleanHref: "$cleanHref"');
-                print('  isSelf: $isSelf');
+                logger.d('  Original href: "$href"');
+                logger.d('  Decoded href: "$decodedHref"');
+                logger.d('  cleanHref: "$cleanHref"');
+                logger.d('  isSelf: $isSelf');
                 
                 if (!isSelf) {
                   final folderName = displayName.isNotEmpty 
                       ? displayName 
                       : path.basename(cleanHref);
                   
-                  print('  ✓ Added folder: $folderName');
+                  logger.d('  ✓ Added folder: $folderName');
                   
                   folders.add({
                     'href': decodedHref,
                     'name': folderName,
                   });
                 } else {
-                  print('  ✗ Skipped (is self/root)');
+                  logger.d('  ✗ Skipped (is self/root)');
                 }
               } else {
-                print('  ✗ Not a collection or empty href');
+                logger.d('  ✗ Not a collection or empty href');
               }
             } catch (e) {
-              print('  Error parsing response: $e');
+              logger.d('  Error parsing response: $e');
             }
           }
 
-          print('\n==== SUMMARY ====');
-          print('Total folders found: ${folders.length}');
+          logger.d('\n==== SUMMARY ====');
+          logger.d('Total folders found: ${folders.length}');
           if (folders.isEmpty) {
-            print('WARNING: No folders found! Check:');
-            print('  1. WebDAV URL is correct');
-            print('  2. Credentials are valid');
-            print('  3. Server has folders/collections');
-            print('  4. Server responses with proper namespace');
+            logger.w('WARNING: No folders found! Check:');
+            logger.w('  1. WebDAV URL is correct');
+            logger.w('  2. Credentials are valid');
+            logger.w('  3. Server has folders/collections');
+            logger.w('  4. Server responses with proper namespace');
           }
-          print('================\n');
+          logger.d('================\n');
           
           return folders;
         } catch (parseError) {
-          print('XML Parse Error: $parseError');
+          logger.e('XML Parse Error: $parseError', error: parseError);
           throw Exception('Fehler beim Parsen der WebDAV-Antwort: $parseError');
         }
       } else if (response.statusCode == 401 || response.statusCode == 403) {
-        print('Authentication error: ${response.statusCode}');
+        logger.e('Authentication error: ${response.statusCode}');
         throw Exception('Authentifizierungsfehler: Benutzername oder Passwort ungültig (${response.statusCode})');
       } else if (response.statusCode == 404) {
-        print('Server returned 404');
+        logger.e('Server returned 404');
         throw Exception('Server antwortet mit 404 - WebDAV-URL ist falsch oder leer');
       } else {
-        print('Unexpected status code: ${response.statusCode}');
+        logger.e('Unexpected status code: ${response.statusCode}');
         throw Exception('Server antwortet mit ${response.statusCode}: ${response.reasonPhrase}');
       }
     } on SocketException catch (e) {
-      print('Socket Exception: $e');
+      logger.e('Socket Exception: $e', error: e);
       throw Exception('Netzwerkfehler - Server nicht erreichbar: $e');
     } catch (e) {
-      print('General Exception: $e');
+      logger.e('General Exception: $e', error: e);
       throw Exception('Fehler beim Auflisten der Ordner: $e');
     }
   }
@@ -524,7 +525,7 @@ class WebdavSyncService {
               allFiles.add(href);
             }
           } catch (e) {
-            print('Fehler beim Parsen einer Ressource: $e');
+            logger.e('Fehler beim Parsen einer Ressource: $e', error: e);
           }
         }
 
@@ -534,7 +535,7 @@ class WebdavSyncService {
             final subFiles = await _listRemoteFilesRecursive(folder);
             allFiles.addAll(subFiles);
           } catch (e) {
-            print('Fehler beim Auflisten von Unterordner $folder: $e');
+            logger.e('Fehler beim Auflisten von Unterordner $folder: $e', error: e);
             // Continue with next folder
           }
         }
@@ -569,7 +570,7 @@ class WebdavSyncService {
       final url = _buildUrl(_config!.remoteFolder);
       final auth = _buildAuthHeader();
       
-      print('getRemoteResources: Lade von URL: $url');
+      logger.d('getRemoteResources: Lade von URL: $url');
 
       final request = http.Request('PROPFIND', Uri.parse(url))
         ..headers['Authorization'] = auth
@@ -585,25 +586,25 @@ class WebdavSyncService {
 
       final response = await http.Response.fromStream(streamedResponse);
 
-      print('getRemoteResources: Response Status: ${response.statusCode}');
+      logger.d('getRemoteResources: Response Status: ${response.statusCode}');
 
       if (response.statusCode == 207) {
         final body = response.body;
-        print('DEBUG getRemoteResources: Response Body (erste 300 Zeichen):\n${body.substring(0, body.length > 300 ? 300 : body.length)}');
+        logger.d('DEBUG getRemoteResources: Response Body (erste 300 Zeichen):\n${body.substring(0, body.length > 300 ? 300 : body.length)}');
         
         final document = XmlDocument.parse(body);
         final List<Map<String, dynamic>> resources = [];
 
         // Nutze namespace-aware Parsing wie in getRemoteFolders
         final root = document.rootElement;
-        print('DEBUG: Root Element Name: ${root.name.local}');
+        logger.d('DEBUG: Root Element Name: ${root.name.local}');
         
         final responseElements = root.children
             .whereType<XmlElement>()
             .where((e) => e.name.local == 'response')
             .toList();
         
-        print('DEBUG: Gefundene response-Elemente: ${responseElements.length}');
+        logger.d('DEBUG: Gefundene response-Elemente: ${responseElements.length}');
 
         for (var responseElement in responseElements) {
           try {
@@ -612,7 +613,7 @@ class WebdavSyncService {
                 .firstWhere((e) => e.name.local == 'href', orElse: () => XmlElement(XmlName('empty')));
             
             final href = hrefElement.innerText;
-            print('DEBUG: [${responseElements.indexOf(responseElement)}] href: "$href"');
+            logger.d('DEBUG: [${responseElements.indexOf(responseElement)}] href: "$href"');
             
             final displayName = responseElement.children
                 .whereType<XmlElement>()
@@ -650,13 +651,13 @@ class WebdavSyncService {
                 .firstWhere((e) => e.name.local == 'getcontentlength', orElse: () => XmlElement(XmlName('empty')))
                 .innerText;
 
-            print('      isCollection: $isCollection, contentLength: $contentLength');
+            logger.d('      isCollection: $isCollection, contentLength: $contentLength');
             final remoteFolderClean = _config!.remoteFolder.replaceAll(RegExp(r'/$'), '');
-            print('      Vergleich: href="$href" vs remoteFolderClean="$remoteFolderClean"');
+            logger.d('      Vergleich: href="$href" vs remoteFolderClean="$remoteFolderClean"');
             
             if (href.isNotEmpty && href != _config!.remoteFolder && href != '${_config!.remoteFolder}/' && href != remoteFolderClean && href != '$remoteFolderClean/') {
               final name = displayName.isNotEmpty ? displayName : path.basename(href.replaceAll(RegExp(r'/$'), ''));
-              print('      ✓ Ressource hinzugefügt: $name (isFolder: $isCollection)');
+              logger.d('      ✓ Ressource hinzugefügt: $name (isFolder: $isCollection)');
               resources.add({
                 'href': href,
                 'name': name,
@@ -664,14 +665,14 @@ class WebdavSyncService {
                 'size': contentLength,
               });
             } else {
-              print('      ✗ Übersprungen (Basis-Ressource)');
+              logger.d('      ✗ Übersprungen (Basis-Ressource)');
             }
           } catch (e) {
-            print('Fehler beim Parsen einer Ressource: $e');
+            logger.e('Fehler beim Parsen einer Ressource: $e', error: e);
           }
         }
 
-        print('DEBUG: Insgesamt ${resources.length} Ressourcen gefunden');
+        logger.d('DEBUG: Insgesamt ${resources.length} Ressourcen gefunden');
         return resources;
       } else if (response.statusCode == 401 || response.statusCode == 403) {
         throw Exception('Authentifizierungsfehler: Benutzername oder Passwort ungültig');
@@ -752,18 +753,18 @@ class WebdavSyncService {
   }
 
   String _buildUrl(String path) {
-    print('_buildUrl Debug:');
-    print('  input path: "$path"');
+    logger.d('_buildUrl Debug:');
+    logger.d('  input path: "$path"');
     
     // Wenn path bereits mit http(s):// beginnt, nutze ihn direkt
     if (path.startsWith('http://') || path.startsWith('https://')) {
       final result = path.replaceAll(RegExp(r'/$'), '');
-      print('  → Vollständige URL - result: "$result"');
+      logger.d('  → Vollständige URL - result: "$result"');
       return result;
     }
     
     final baseUrl = _config!.webdavUrl.replaceAll(RegExp(r'/$'), '');
-    print('  baseUrl: "$baseUrl"');
+    logger.d('  baseUrl: "$baseUrl"');
     
     // Wenn path mit dem Server-Hostname beginnt (z.B. /remote.php/...)
     // ist es ein absoluter Server-Pfad und sollte direkt an den Server gehängt werden
@@ -776,14 +777,14 @@ class WebdavSyncService {
       
       final cleanPath = path.replaceAll(RegExp(r'/$'), '');
       final result = '$scheme://$host$port$cleanPath';
-      print('  → Absoluter Server-Pfad - result: "$result"');
+      logger.d('  → Absoluter Server-Pfad - result: "$result"');
       return result;
     }
     
     // Sonst: Relativer Pfad - concateniere mit baseUrl
     final cleanPath = path.replaceAll(RegExp(r'^/'), '');
     final result = '$baseUrl/$cleanPath';
-    print('  → Relativer Pfad - result: "$result"');
+    logger.d('  → Relativer Pfad - result: "$result"');
     return result;
   }
 
@@ -796,7 +797,7 @@ class WebdavSyncService {
   Future<bool> testConnection() async {
     final validationError = validateConfig();
     if (validationError != null) {
-      print('Konfigurationsvalidierungsfehler: $validationError');
+      logger.e('Konfigurationsvalidierungsfehler: $validationError');
       return false;
     }
 
@@ -804,7 +805,7 @@ class WebdavSyncService {
       final url = _buildUrl(_config!.remoteFolder);
       final auth = _buildAuthHeader();
       
-      print('Teste WebDAV-Verbindung zu: $url');
+      logger.i('Teste WebDAV-Verbindung zu: $url');
 
       final request = http.Request('PROPFIND', Uri.parse(url))
         ..headers['Authorization'] = auth
@@ -820,29 +821,29 @@ class WebdavSyncService {
       final response = await http.Response.fromStream(streamedResponse);
 
       if (response.statusCode == 207) {
-        print('Verbindungstest erfolgreich');
+        logger.i('Verbindungstest erfolgreich');
         return true;
       } else if (response.statusCode == 401 || response.statusCode == 403) {
-        print('Authentifizierungsfehler: ${response.statusCode}');
+        logger.e('Authentifizierungsfehler: ${response.statusCode}');
         return false;
       } else if (response.statusCode == 404) {
-        print('Remote-Ordner nicht gefunden: ${response.statusCode}');
+        logger.e('Remote-Ordner nicht gefunden: ${response.statusCode}');
         return false;
       } else if (response.statusCode == 405) {
-        print('405 Method Not Allowed - WebDAV unterstützt PROPFIND nicht auf diesem Pfad');
-        print('Überprüfe: 1) WebDAV-URL ist korrekt, 2) Remote-Ordner Pfad stimmt');
-        print('Versuche mit/ohne Trailing Slash: $url oder $url/');
+        logger.e('405 Method Not Allowed - WebDAV unterstützt PROPFIND nicht auf diesem Pfad');
+        logger.e('Überprüfe: 1) WebDAV-URL ist korrekt, 2) Remote-Ordner Pfad stimmt');
+        logger.e('Versuche mit/ohne Trailing Slash: $url oder $url/');
         return false;
       } else {
-        print('Verbindungstest fehlgeschlagen: ${response.statusCode} ${response.reasonPhrase}');
-        print('Response: ${response.body.substring(0, min(200, response.body.length))}');
+        logger.e('Verbindungstest fehlgeschlagen: ${response.statusCode} ${response.reasonPhrase}');
+        logger.e('Response: ${response.body.substring(0, min(200, response.body.length))}');
         return false;
       }
     } on SocketException catch (e) {
-      print('Netzwerkfehler: $e');
+      logger.e('Netzwerkfehler: $e', error: e);
       return false;
     } catch (e) {
-      print('Verbindungstest Fehler: $e');
+      logger.e('Verbindungstest Fehler: $e', error: e);
       return false;
     }
   }
