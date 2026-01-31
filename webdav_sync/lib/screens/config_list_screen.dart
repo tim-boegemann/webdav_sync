@@ -109,25 +109,45 @@ class _ConfigListScreenState extends State<ConfigListScreen>
                     children: [
                       Row(
                         children: [
-                          // Zeige rotierendes Icon während Sync läuft, sonst normales Icon
-                          if (syncProvider.isLoading &&
-                              syncProvider.config?.id == config.id)
-                            RotationTransition(
-                              turns: _rotationController,
-                              child: Icon(
-                                Icons.cloud_sync,
-                                color: AppColors.primaryButtonBackground,
-                                size: 28,
-                              ),
-                            )
-                          else
-                            Icon(
-                              Icons.cloud_sync,
-                              color: isSelected
-                                  ? AppColors.primaryButtonBackground
-                                  : Colors.grey,
-                              size: 28,
-                            ),
+                          // Icon basierend auf Sync-Status
+                          FutureBuilder<SyncStatus?>(
+                            future: context.read<SyncProvider>().getSyncStatusForConfig(config.id),
+                            builder: (context, snapshot) {
+                              final syncStatus = snapshot.data;
+                              final isCurrentlySyncing = syncProvider.isLoading && syncProvider.config?.id == config.id;
+                              final statusStr = syncStatus == null ? '' : syncStatus.status.toLowerCase().trim();
+                              
+                              // Bestimme das Icon basierend auf Status
+                              IconData iconData;
+                              if (isCurrentlySyncing) {
+                                iconData = Icons.sync; // Zwei Pfeile die einen Kreis ergeben
+                              } else if (statusStr.contains('erfolgreich')) {
+                                iconData = Icons.check; // Haken
+                              } else {
+                                iconData = Icons.close; // X (für alle anderen Fälle: fehler, fehlgeschlagen, leer, abgebrochen, etc.)
+                              }
+                              
+                              // Wenn gerade lädt, animiere das Icon
+                              if (isCurrentlySyncing) {
+                                return RotationTransition(
+                                  turns: Tween<double>(begin: 0, end: -1).animate(_rotationController),
+                                  child: Icon(
+                                    iconData,
+                                    color: AppColors.primaryButtonBackground,
+                                    size: 28,
+                                  ),
+                                );
+                              } else {
+                                return Icon(
+                                  iconData,
+                                  color: isSelected
+                                      ? AppColors.primaryButtonBackground
+                                      : AppColors.primaryButtonBackground,
+                                  size: 28,
+                                );
+                              }
+                            },
+                          ),
                           const SizedBox(width: 16),
                           Expanded(
                             child: Column(
@@ -142,7 +162,7 @@ class _ConfigListScreenState extends State<ConfigListScreen>
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  '${config.webdavUrl}\n↔ ${config.localFolder}',
+                                  '${config.remoteFolder}\n↔ ${config.localFolder}',
                                   maxLines: 2,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(fontSize: 12, color: Colors.grey),

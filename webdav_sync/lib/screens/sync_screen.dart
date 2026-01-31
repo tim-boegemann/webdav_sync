@@ -4,9 +4,14 @@ import '../providers/sync_provider.dart';
 import '../theme/app_colors.dart';
 import 'config_screen.dart';
 
-class SyncScreen extends StatelessWidget {
+class SyncScreen extends StatefulWidget {
   const SyncScreen({super.key});
 
+  @override
+  State<SyncScreen> createState() => _SyncScreenState();
+}
+
+class _SyncScreenState extends State<SyncScreen> {
   Future<void> _showSyncConfirmationDialog(
     BuildContext context,
     SyncProvider syncProvider,
@@ -24,7 +29,20 @@ class SyncScreen extends StatelessWidget {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
-            Navigator.of(context).pop();
+            try {
+              // Wenn noch ein Sync läuft, breche ihn ab bevor wir zurücknavigieren
+              if (context.read<SyncProvider>().isLoading) {
+                context.read<SyncProvider>().cancelSync();
+              }
+              if (mounted) {
+                Navigator.of(context).pop();
+              }
+            } catch (e) {
+              print('Fehler beim Zurücknavigieren: $e');
+              if (mounted) {
+                Navigator.of(context).pop();
+              }
+            }
           },
         ),
       ),

@@ -7,18 +7,38 @@ class ShortcutsHandler {
   // Callback für Shortcuts-Befehle
   static Function(String command, Map<String, String> params)? onShortcutCommand;
   
+  // Callback für Background Fetch
+  static Future<bool> Function()? onBackgroundFetch;
+  
   /// Initialisiere den Shortcuts-Handler
   static void initialize() {
     platform.setMethodCallHandler((MethodCall call) async {
-      if (call.method == 'handleShortcutCommand') {
-        final args = call.arguments as Map;
-        final command = args['command'] as String? ?? '';
-        final params = Map<String, String>.from(args['params'] ?? {});
-        
-        print('Shortcuts: Empfangener Befehl - $command mit Parametern: $params');
-        
-        // Rufe den Callback auf
-        onShortcutCommand?.call(command, params);
+      try {
+        if (call.method == 'handleShortcutCommand') {
+          final args = call.arguments as Map;
+          final command = args['command'] as String? ?? '';
+          final params = Map<String, String>.from(args['params'] ?? {});
+          
+          print('Shortcuts: Empfangener Befehl - $command mit Parametern: $params');
+          
+          // Rufe den Callback auf
+          onShortcutCommand?.call(command, params);
+          return null;
+        } else if (call.method == 'handleBackgroundFetch') {
+          print('Background Fetch: Starte Synchronisierung im Hintergrund');
+          
+          // Rufe Background Fetch Handler auf
+          final success = await onBackgroundFetch?.call() ?? false;
+          
+          print('Background Fetch: Synchronisierung ${success ? 'erfolgreich' : 'fehlgeschlagen'}');
+          
+          return {
+            'success': success,
+            'timestamp': DateTime.now().toIso8601String(),
+          };
+        }
+      } catch (e) {
+        print('ShortcutsHandler Fehler: $e');
       }
       return null;
     });

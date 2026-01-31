@@ -49,6 +49,9 @@ class SyncProvider extends ChangeNotifier {
     ShortcutsHandler.onShortcutCommand = (command, params) {
       _handleShortcutCommand(command, params);
     };
+    
+    // Registriere Background Fetch Handler
+    ShortcutsHandler.onBackgroundFetch = _handleBackgroundFetch;
   }
 
   /// Handle Shortcuts-Befehle von iOS App Intents
@@ -115,6 +118,30 @@ class SyncProvider extends ChangeNotifier {
       print('Error: ${_syncStatus?.error}');
     }
     print('===========================');
+  }
+
+  /// Handle Background Fetch von iOS
+  Future<bool> _handleBackgroundFetch() async {
+    try {
+      print('SyncProvider: Background Fetch - Starte Synchronisierung aller Configs');
+      
+      // Lade aktuelle Configs
+      await _loadConfigs();
+      
+      // Synchronisiere alle Configs
+      if (_allConfigs.isEmpty) {
+        print('SyncProvider: Keine Configs zum Synchronisieren vorhanden');
+        return false;
+      }
+      
+      await _syncAllConfigs();
+      
+      print('SyncProvider: Background Fetch - Alle Syncs abgeschlossen');
+      return true;
+    } catch (e) {
+      print('SyncProvider: Background Fetch Fehler - $e');
+      return false;
+    }
   }
 
   Future<void> _loadConfigs() async {
@@ -259,6 +286,8 @@ class SyncProvider extends ChangeNotifier {
   void cancelSync() {
     print('Sync-Abbruch angefordert');
     _syncService.cancelSync();
+    _isLoading = false;
+    notifyListeners();
   }
 
   Future<int> countFilesToSync() async {
