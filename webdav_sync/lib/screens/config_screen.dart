@@ -8,9 +8,9 @@ import '../theme/app_colors.dart';
 import '../widgets/custom_time_picker.dart';
 
 class ConfigScreen extends StatefulWidget {
-  final SyncConfig? configToEdit;
+  final String? configId;
 
-  const ConfigScreen({super.key, this.configToEdit});
+  const ConfigScreen({super.key, this.configId});
 
   @override
   State<ConfigScreen> createState() => _ConfigScreenState();
@@ -28,15 +28,21 @@ class _ConfigScreenState extends State<ConfigScreen> {
   bool _showPassword = false;
   String? _lastError;
   bool _isNewConfig = false;
-  String _syncIntervalOption = 'schedule'; // hourly, daily, weekly, custom, schedule
+  String _syncIntervalOption = 'schedule'; // hourly, daily, weekly, custom, schedule 
   List<bool> _selectedDays = [true, true, true, true, true, false, false]; // Mo-Fr default
   TimeOfDay _selectedTime = const TimeOfDay(hour: 14, minute: 0);
 
   @override
   void initState() {
     super.initState();
-    final config = widget.configToEdit;
-    _isNewConfig = config == null;
+    final config = widget.configId != null 
+        ? context.read<SyncProvider>().allConfigs.firstWhere(
+              (c) => c.id == widget.configId,
+              orElse: () => SyncConfig(id: '', name: '', webdavUrl: '', username: '', password: '', remoteFolder: '', localFolder: ''),
+            )
+        : null;
+    
+    _isNewConfig = config == null || config.id.isEmpty;
 
     _configNameController = TextEditingController(text: config?.name ?? '');
     _webdavUrlController = TextEditingController(text: config?.webdavUrl ?? '');
@@ -50,7 +56,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
     _autoSync = config?.autoSync ?? false;
     
     // Für neue Konfigurationen: Setze Standardwerte
-    if (config == null) {
+    if (_isNewConfig) {
       _selectedDays = [true, true, true, true, true, false, false]; // Mo-Fr default
       _selectedTime = const TimeOfDay(hour: 14, minute: 0);
       _syncIntervalOption = 'schedule';
@@ -58,7 +64,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
     } else {
       // Für bestehende Konfigurationen: Lade die gespeicherten Werte
       // Initialisiere Wochentage
-      if (config.syncDaysOfWeek.isNotEmpty) {
+      if (config!.syncDaysOfWeek.isNotEmpty) {
         _selectedDays = [false, false, false, false, false, false, false];
         for (int day in config.syncDaysOfWeek) {
           if (day >= 1 && day <= 7) {
@@ -114,15 +120,68 @@ class _ConfigScreenState extends State<ConfigScreen> {
     super.dispose();
   }
 
-  void _saveConfig() {
+  void _saveConfig() async {
     try {
+      // Validiere alle erforderlichen Felder
       if (_configNameController.text.isEmpty) {
         setState(() => _lastError = 'Bitte gib einen Namen für das Profil ein');
         return;
       }
+      
+      if (_webdavUrlController.text.isEmpty) {
+        setState(() => _lastError = 'Bitte gib eine WebDAV URL ein');
+        return;
+      }
+      
+      if (_usernameController.text.isEmpty) {
+        setState(() => _lastError = 'Bitte gib einen Benutzernamen ein');
+        return;
+      }
+      
+      if (_passwordController.text.isEmpty) {
+        setState(() => _lastError = 'Bitte gib ein Passwort ein');
+        return;
+      }
+      
+      if (_remoteFolderController.text.isEmpty) {
+        setState(() => _lastError = 'Bitte gib einen Remote-Ordner ein');
+        return;
+      }
+      
+      if (_localFolderController.text.isEmpty) {
+        setState(() => _lastError = 'Bitte gib einen lokalen Ordner ein');
+        return;
+      }
+      
+      if (_syncIntervalOption == 'custom') {
+        final interval = int.tryParse(_syncIntervalController.text);
+        if (interval == null || interval <= 0) {
+          setState(() => _lastError = 'Bitte gib ein gültiges Sync-Intervall (Minuten) ein');
+          return;
+        }
+      }
+      
+      if (_syncIntervalOption == 'schedule') {
+        final hasSelectedDays = _selectedDays.any((day) => day);
+        if (!hasSelectedDays) {
+          setState(() => _lastError = 'Bitte wähle mindestens einen Wochentag aus');
+          return;
+        }
+      }
+
+      // Stelle sicher, dass syncDaysOfWeek leer ist, wenn nicht "Nach Plan" gewählt wurde
+      List<int> syncDaysOfWeek = [];
+      if (_syncIntervalOption == 'schedule') {
+        syncDaysOfWeek = _selectedDays
+            .asMap()
+            .entries
+            .where((e) => e.value)
+            .map((e) => e.key + 1)
+            .toList();
+      }
 
       final config = SyncConfig(
-        id: widget.configToEdit?.id,
+        id: widget.configId,
         name: _configNameController.text,
         webdavUrl: _webdavUrlController.text,
         username: _usernameController.text,
@@ -131,18 +190,17 @@ class _ConfigScreenState extends State<ConfigScreen> {
         localFolder: _localFolderController.text,
         syncIntervalMinutes: int.tryParse(_syncIntervalController.text) ?? 15,
         autoSync: _autoSync,
-        syncDaysOfWeek: _selectedDays
-            .asMap()
-            .entries
-            .where((e) => e.value)
-            .map((e) => e.key + 1)
-            .toList(),
-        syncTime: '${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}',
+        syncDaysOfWeek: syncDaysOfWeek,
+        syncTime: _syncIntervalOption == 'schedule' 
+            ? '${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}'
+            : '',
       );
 
-      context.read<SyncProvider>().saveConfig(config);
+      await context.read<SyncProvider>().saveConfig(config);
       
       setState(() => _lastError = null);
+
+      if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -152,7 +210,9 @@ class _ConfigScreenState extends State<ConfigScreen> {
       );
 
       // Navigiere zurück zur ConfigList
-      Navigator.of(context).pop();
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
     } catch (e) {
       _handleException(e, 'Error saving configuration');
     }
@@ -210,7 +270,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
       }
 
       final config = SyncConfig(
-        id: widget.configToEdit?.id,
+        id: widget.configId,
         name: _configNameController.text.isEmpty 
             ? 'Temp Config' 
             : _configNameController.text,

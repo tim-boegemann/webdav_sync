@@ -133,7 +133,7 @@ class _CustomTimePickerState extends State<CustomTimePicker> {
             Container(
               padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
               decoration: BoxDecoration(
-                color: AppColors.primaryButtonBackground.withOpacity(0.1),
+                color: AppColors.primaryButtonBackground.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
                   color: AppColors.primaryButtonBackground,

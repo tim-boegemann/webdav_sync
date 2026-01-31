@@ -171,6 +171,11 @@ class SyncProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Aktualisiert die Config-Liste und lädt die aktuelle Config neu
+  Future<void> refreshConfigs() async {
+    await _loadConfigs();
+  }
+
   Future<void> setCurrentConfig(SyncConfig config) async {
     _config = config;
     await _configService.setSelectedConfigId(config.id);
@@ -184,19 +189,47 @@ class SyncProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Lädt eine Config basierend auf ihrer ID (für Navigation)
+  Future<void> loadConfigById(String configId) async {
+    try {
+      final config = await _configService.loadConfig(configId);
+      if (config != null) {
+        _config = config;
+        _syncService.initialize(config);
+        await _syncService.initializeHashDatabase();
+        _validationError = _syncService.validateConfig();
+        
+        // Lade den SyncStatus für diese Config
+        _syncStatus = await _configService.getLastSyncStatus(config.id);
+        
+        notifyListeners();
+      }
+    } catch (e) {
+      print('Fehler beim Laden der Config mit ID $configId: $e');
+    }
+  }
+
   Future<void> saveConfig(SyncConfig config) async {
-    _config = config;
+    // Speichere die Config in jedem Fall
     await _configService.saveConfig(config);
     
     // Aktualisiere die Liste
     _allConfigs = await _configService.getAllConfigs();
     
-    _syncService.initialize(config);
-    await _syncService.initializeHashDatabase();
-    _validationError = _syncService.validateConfig();
-    
-    // Lade den bestehenden SyncStatus für diese Config (nicht null setzen!)
-    _syncStatus = await _configService.getLastSyncStatus(config.id);
+    // Nur wenn nicht gerade ein Sync läuft, wechsle zur neuen Config
+    if (!_isLoading) {
+      _config = config;
+      _syncService.initialize(config);
+      await _syncService.initializeHashDatabase();
+      _validationError = _syncService.validateConfig();
+      
+      // Lade den bestehenden SyncStatus für diese Config (nicht null setzen!)
+      _syncStatus = await _configService.getLastSyncStatus(config.id);
+    } else {
+      // Wenn ein Sync läuft, aktualisiere nur die Config in der Liste
+      print('SyncProvider: Sync läuft noch, aktualisiere nur die Config in der Liste');
+      // Die aktuelle Config bleibt erhalten bis der Sync abgeschlossen ist
+    }
     
     notifyListeners();
   }
@@ -451,30 +484,47 @@ class SyncProvider extends ChangeNotifier {
 
   /// Überprüfe ob für die aktuelle Config ein Auto-Sync notwendig ist und führe ihn durch
   Future<void> _checkAndPerformAutoSync() async {
-    // Wenn bereits ein Sync läuft oder keine Config existiert, skip
-    if (_isLoading || _config == null || !_config!.autoSync) {
+    // Wenn bereits ein Sync läuft, skip
+    if (_isLoading) {
       return;
     }
 
-    // Wenn noch nie synced wurde, führe sofort den ersten Sync durch
-    if (_syncStatus == null) {
-      print('SyncProvider: Führe initialen Auto-Sync für ${_config!.name} durch');
-      await performSync();
-      return;
-    }
-
-    try {
-      final lastSyncTime = DateTime.parse(_syncStatus!.lastSyncTime);
-      final now = DateTime.now();
-      final elapsedMinutes = now.difference(lastSyncTime).inMinutes;
-
-      // Wenn seit dem letzten Sync genug Zeit vergangen ist, führe neuen Sync durch
-      if (elapsedMinutes >= _config!.syncIntervalMinutes) {
-        print('SyncProvider: Auto-Sync für ${_config!.name} fällig (${elapsedMinutes}min vergangen, Intervall: ${_config!.syncIntervalMinutes}min)');
-        await performSync();
+    // Durchsuche alle Configs und führe Auto-Sync für diejenigen durch, die fällig sind
+    for (final config in _allConfigs) {
+      if (!config.autoSync) {
+        continue; // Skip Configs ohne Auto-Sync
       }
-    } catch (e) {
-      print('Fehler beim Auto-Sync-Check: $e');
+
+      try {
+        // Lade den SyncStatus für diese Config
+        final syncStatus = await _configService.getLastSyncStatus(config.id);
+
+        // Wenn noch nie synced wurde, führe sofort den ersten Sync durch
+        if (syncStatus == null) {
+          print('SyncProvider: Führe initialen Auto-Sync für ${config.name} durch');
+          await setCurrentConfig(config);
+          await performSync();
+          continue;
+        }
+
+        // Prüfe ob genug Zeit seit dem letzten Sync vergangen ist
+        try {
+          final lastSyncTime = DateTime.parse(syncStatus.lastSyncTime);
+          final now = DateTime.now();
+          final elapsedMinutes = now.difference(lastSyncTime).inMinutes;
+
+          // Wenn seit dem letzten Sync genug Zeit vergangen ist, führe neuen Sync durch
+          if (elapsedMinutes >= config.syncIntervalMinutes) {
+            print('SyncProvider: Auto-Sync für ${config.name} fällig (${elapsedMinutes}min vergangen, Intervall: ${config.syncIntervalMinutes}min)');
+            await setCurrentConfig(config);
+            await performSync();
+          }
+        } catch (e) {
+          print('Fehler beim Berechnen der verstrichenen Zeit für ${config.name}: $e');
+        }
+      } catch (e) {
+        print('Fehler beim Auto-Sync-Check für ${config.name}: $e');
+      }
     }
   }
 }

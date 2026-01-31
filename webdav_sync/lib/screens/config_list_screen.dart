@@ -15,7 +15,7 @@ class ConfigListScreen extends StatefulWidget {
 }
 
 class _ConfigListScreenState extends State<ConfigListScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late AnimationController _rotationController;
 
   @override
@@ -25,12 +25,28 @@ class _ConfigListScreenState extends State<ConfigListScreen>
       duration: const Duration(seconds: 2),
       vsync: this,
     )..repeat();
+    WidgetsBinding.instance.addObserver(this);
+    // Refresh configs beim Start
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<SyncProvider>().refreshConfigs();
+    });
   }
 
   @override
   void dispose() {
     _rotationController.dispose();
+    WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Refresh configs when returning to the screen
+      if (mounted) {
+        context.read<SyncProvider>().refreshConfigs();
+      }
+    }
   }
 
   @override
@@ -83,9 +99,8 @@ class _ConfigListScreenState extends State<ConfigListScreen>
 
               return InkWell(
                 onTap: () {
-                  context.read<SyncProvider>().setCurrentConfig(config);
                   Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const SyncScreen()),
+                    MaterialPageRoute(builder: (_) => SyncScreen(configId: config.id)),
                   );
                 },
                 child: Card(
@@ -104,213 +119,224 @@ class _ConfigListScreenState extends State<ConfigListScreen>
                       horizontal: 16,
                       vertical: 12,
                     ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          // Icon basierend auf Sync-Status
-                          FutureBuilder<SyncStatus?>(
-                            future: context.read<SyncProvider>().getSyncStatusForConfig(config.id),
-                            builder: (context, snapshot) {
-                              final syncStatus = snapshot.data;
-                              final isCurrentlySyncing = syncProvider.isLoading && syncProvider.config?.id == config.id;
-                              final statusStr = syncStatus == null ? '' : syncStatus.status.toLowerCase().trim();
-                              
-                              // Bestimme das Icon basierend auf Status
-                              IconData iconData;
-                              if (isCurrentlySyncing) {
-                                iconData = Icons.sync; // Zwei Pfeile die einen Kreis ergeben
-                              } else if (statusStr.contains('erfolgreich')) {
-                                iconData = Icons.check; // Haken
-                              } else {
-                                iconData = Icons.close; // X (für alle anderen Fälle: fehler, fehlgeschlagen, leer, abgebrochen, etc.)
-                              }
-                              
-                              // Wenn gerade lädt, animiere das Icon
-                              if (isCurrentlySyncing) {
-                                return RotationTransition(
-                                  turns: Tween<double>(begin: 0, end: -1).animate(_rotationController),
-                                  child: Icon(
-                                    iconData,
-                                    color: AppColors.primaryButtonBackground,
-                                    size: 28,
-                                  ),
-                                );
-                              } else {
-                                return Icon(
-                                  iconData,
-                                  color: isSelected
-                                      ? AppColors.primaryButtonBackground
-                                      : AppColors.primaryButtonBackground,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            // Animated sync icon
+                            if (syncProvider.isLoading && syncProvider.config?.id == config.id)
+                              RotationTransition(
+                                turns: Tween<double>(begin: 0, end: -1).animate(_rotationController),
+                                child: Icon(
+                                  Icons.sync,
+                                  color: AppColors.primaryButtonBackground,
                                   size: 28,
-                                );
-                              }
-                            },
-                          ),
-                          const SizedBox(width: 16),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  config.name,
-                                  style: TextStyle(
-                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                    fontSize: 16,
+                                ),
+                              )
+                            else
+                              Icon(
+                                Icons.check_circle,
+                                color: AppColors.primaryButtonBackground,
+                                size: 28,
+                              ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    config.name,
+                                    style: TextStyle(
+                                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${config.remoteFolder}\n↔ ${config.localFolder}',
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            PopupMenuButton<String>(
+                              onSelected: (value) {
+                                if (value == 'edit') {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => ConfigScreen(configId: config.id),
+                                    ),
+                                  );
+                                } else if (value == 'delete') {
+                                  _showDeleteConfirmation(context, config);
+                                } else if (value == 'sync') {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(builder: (_) => SyncScreen(configId: config.id)),
+                                  );
+                                }
+                              },
+                              itemBuilder: (BuildContext context) => [
+                                PopupMenuItem<String>(
+                                  value: 'sync',
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.sync, size: 18),
+                                      const SizedBox(width: 8),
+                                      const Text('Synchronisieren'),
+                                    ],
                                   ),
                                 ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  '${config.remoteFolder}\n↔ ${config.localFolder}',
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                PopupMenuItem<String>(
+                                  value: 'edit',
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.edit, size: 18),
+                                      const SizedBox(width: 8),
+                                      const Text('Bearbeiten'),
+                                    ],
+                                  ),
+                                ),
+                                PopupMenuItem<String>(
+                                  value: 'delete',
+                                  child: Row(
+                                    children: [
+                                      const Icon(Icons.delete, size: 18, color: Colors.red),
+                                      const SizedBox(width: 8),
+                                      const Text('Löschen', style: TextStyle(color: Colors.red)),
+                                    ],
+                                  ),
                                 ),
                               ],
                             ),
-                          ),
-                          PopupMenuButton<String>(
-                            onSelected: (value) {
-                              if (value == 'edit') {
-                                Navigator.of(context).push(
-                                  MaterialPageRoute(
-                                    builder: (_) => ConfigScreen(configToEdit: config),
-                                  ),
-                                );
-                              } else if (value == 'delete') {
-                                _showDeleteConfirmation(context, config);
-                              } else if (value == 'sync') {
-                                context.read<SyncProvider>().setCurrentConfig(config);
-                                Navigator.of(context).pushReplacement(
-                                  MaterialPageRoute(builder: (_) => const SyncScreen()),
-                                );
-                              }
-                            },
-                            itemBuilder: (BuildContext context) => [
-                              PopupMenuItem<String>(
-                                value: 'sync',
-                                child: Row(
-                                  children: [
-                                    const Icon(Icons.sync, size: 18),
-                                    const SizedBox(width: 8),
-                                    const Text('Synchronisieren'),
-                                  ],
-                                ),
-                              ),
-                              PopupMenuItem<String>(
-                                value: 'edit',
-                                child: Row(
-                                  children: [
-                                    const Icon(Icons.edit, size: 18),
-                                    const SizedBox(width: 8),
-                                    const Text('Bearbeiten'),
-                                  ],
-                                ),
-                              ),
-                              PopupMenuItem<String>(
-                                value: 'delete',
-                                child: Row(
-                                  children: [
-                                    const Icon(Icons.delete, size: 18, color: Colors.red),
-                                    const SizedBox(width: 8),
-                                    const Text('Löschen', style: TextStyle(color: Colors.red)),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      // Sync Status Information
-                      FutureBuilder<SyncStatus?>(
-                        future: context.read<SyncProvider>().getSyncStatusForConfig(config.id),
-                        builder: (context, snapshot) {
-                          final syncStatus = snapshot.data;
-                          
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Status: ${syncStatus?.status ?? '-'}',
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        // Sync Type and Auto Sync Information
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                config.syncDaysOfWeek.isNotEmpty ? 'Nach Plan' : 'Benutzerdefiniert',
                                 style: TextStyle(
                                   fontSize: 11,
                                   color: Colors.grey[700],
+                                  fontWeight: FontWeight.w500,
                                 ),
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                _formatSyncDateTime(syncStatus?.lastSyncTime),
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.grey[700],
-                                ),
+                            ),
+                            Text(
+                              config.autoSync ? 'Auto: An' : 'Auto: Aus',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey[700],
                               ),
-                              if (config.autoSync)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  child: FutureBuilder<String>(
-                                    future: context.read<SyncProvider>().getNextSyncTimeForConfig(config, syncStatus),
-                                    builder: (context, nextSyncSnapshot) {
-                                      final isSchedule = config.syncDaysOfWeek.isNotEmpty;
-                                      final label = isSchedule ? 'Nächster Sync nach Plan:' : 'Nächster Sync:';
-                                      final nextSyncTime = nextSyncSnapshot.data ?? '-';
-                                      
-                                      // Format: "Mi 04.02.2026 15:30" -> Extract day name
-                                      String displayText = nextSyncTime;
-                                      if (isSchedule && nextSyncTime != '-') {
-                                        try {
-                                          final parts = nextSyncTime.split(' ');
-                                          if (parts.length >= 2) {
-                                            // Parse date to get day name
-                                            final dateParts = parts[0].split('.');
-                                            if (dateParts.length == 3) {
-                                              final day = int.parse(dateParts[0]);
-                                              final month = int.parse(dateParts[1]);
-                                              final year = int.parse(dateParts[2]);
-                                              final date = DateTime(year, month, day);
-                                              final dayNames = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'];
-                                              final dayName = dayNames[date.weekday - 1];
-                                              displayText = '$dayName ${parts[0]} ${parts[1]}';
-                                            }
-                                          }
-                                        } catch (e) {
-                                          // Fallback zu originalem Format
-                                        }
-                                      }
-                                      
-                                      return Text(
-                                        '$label $displayText',
-                                        style: TextStyle(
-                                          fontSize: 11,
-                                          color: Colors.grey[700],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        // Last Sync Time - für diese spezifische Config
+                        FutureBuilder<SyncStatus?>(
+                          future: context.read<SyncProvider>().getSyncStatusForConfig(config.id),
+                          builder: (context, snapshot) {
+                            try {
+                              final configSyncStatus = snapshot.data;
+                              
+                              // Prüfe ob gerade ein Sync läuft für diese Config
+                              final isCurrentlySyncing = syncProvider.isLoading && syncProvider.config?.id == config.id;
+                              
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  // Progressbar wenn Sync läuft
+                                  if (isCurrentlySyncing && syncProvider.totalSyncFiles > 0)
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            const Text(
+                                              'Synchronisiere...',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w500,
+                                                color: Colors.blue,
+                                              ),
+                                            ),
+                                            Text(
+                                              '${syncProvider.currentSyncProgress}/${syncProvider.totalSyncFiles}',
+                                              style: const TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.blue,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ],
                                         ),
-                                      );
-                                    },
-                                  ),
-                                ),
-                              if (!config.autoSync)
-                                Padding(
-                                  padding: const EdgeInsets.only(top: 4),
-                                  child: Text(
-                                    'Auto Sync: false',
+                                        const SizedBox(height: 4),
+                                        ClipRRect(
+                                          borderRadius: BorderRadius.circular(3),
+                                          child: LinearProgressIndicator(
+                                            value: syncProvider.totalSyncFiles > 0
+                                                ? syncProvider.currentSyncProgress / syncProvider.totalSyncFiles
+                                                : 0,
+                                            minHeight: 6,
+                                            backgroundColor: Colors.grey[300],
+                                            valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                      ],
+                                    ),
+                                  
+                                  Text(
+                                    'Letzter Sync: ${_formatSyncDateTime(configSyncStatus?.lastSyncTime ?? '')}',
                                     style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.grey[700],
+                                      fontSize: 10,
+                                      color: Colors.grey[600],
                                     ),
                                   ),
-                                ),
-                            ],
-                          );
-                        },
-                      ),
-                    ],
+                                  if (config.autoSync)
+                                    Padding(
+                                      padding: const EdgeInsets.only(top: 4),
+                                      child: FutureBuilder<String>(
+                                        future: context.read<SyncProvider>().getNextSyncTimeForConfig(
+                                          config,
+                                          configSyncStatus,
+                                        ),
+                                        builder: (context, nextSyncSnapshot) {
+                                          try {
+                                            final nextSyncTime = nextSyncSnapshot.data ?? '-';
+                                            final isSchedule = config.syncDaysOfWeek.isNotEmpty;
+                                            final label = isSchedule ? 'Nächster Sync (Plan):' : 'Nächster Sync:';
+                                            return Text(
+                                              '$label $nextSyncTime',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: Colors.grey[600],
+                                              ),
+                                            );
+                                          } catch (e) {
+                                            return const SizedBox();
+                                          }
+                                        },
+                                      ),
+                                    ),
+                                ],
+                              );
+                            } catch (e) {
+                              return const SizedBox();
+                            }
+                          },
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
               );
             },
           );
@@ -322,7 +348,7 @@ class _ConfigListScreenState extends State<ConfigListScreen>
         onPressed: () {
           Navigator.of(context).push(
             MaterialPageRoute(
-              builder: (_) => const ConfigScreen(configToEdit: null),
+              builder: (_) => const ConfigScreen(configId: null),
             ),
           );
         },
@@ -362,10 +388,10 @@ class _ConfigListScreenState extends State<ConfigListScreen>
     );
   }
 
-  /// Formatiert den lastSyncTime in das Format "Letzter Sync: TT.MM.JJJJ HH:MM"
+  /// Formatiert den lastSyncTime in das Format "TT.MM.JJJJ HH:MM" oder "-"
   String _formatSyncDateTime(String? dateTimeString) {
     if (dateTimeString == null || dateTimeString.isEmpty) {
-      return 'Letzter Sync: -';
+      return '-';
     }
 
     try {
@@ -376,9 +402,10 @@ class _ConfigListScreenState extends State<ConfigListScreen>
       final hour = dateTime.hour.toString().padLeft(2, '0');
       final minute = dateTime.minute.toString().padLeft(2, '0');
       
-      return 'Letzter Sync: $day.$month.$year $hour:$minute';
+      return '$day.$month.$year $hour:$minute';
     } catch (e) {
-      return 'Letzter Sync: -';
+      return '-';
     }
   }
 }
+

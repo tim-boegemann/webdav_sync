@@ -5,7 +5,12 @@ import '../theme/app_colors.dart';
 import 'config_screen.dart';
 
 class SyncScreen extends StatefulWidget {
-  const SyncScreen({super.key});
+  final String configId;
+
+  const SyncScreen({
+    super.key,
+    required this.configId,
+  });
 
   @override
   State<SyncScreen> createState() => _SyncScreenState();
@@ -28,12 +33,16 @@ class _SyncScreenState extends State<SyncScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () {
+          onPressed: () async {
             try {
               // Wenn noch ein Sync läuft, breche ihn ab bevor wir zurücknavigieren
               if (context.read<SyncProvider>().isLoading) {
                 context.read<SyncProvider>().cancelSync();
               }
+              
+              // Warte kurz, damit der Provider aktualisiert wird
+              await Future.delayed(const Duration(milliseconds: 100));
+              
               if (mounted) {
                 Navigator.of(context).pop();
               }
@@ -46,51 +55,67 @@ class _SyncScreenState extends State<SyncScreen> {
           },
         ),
       ),
-      body: Consumer<SyncProvider>(
-        builder: (context, syncProvider, _) {
-          if (syncProvider.config == null) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    Icons.folder_off,
-                    size: 64,
-                    color: Colors.grey,
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'No Configuration Found',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                            builder: (_) => const ConfigScreen()),
-                      );
-                    },
-                    icon: const Icon(Icons.settings),
-                    label: const Text('Configure WebDAV'),
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 32,
-                        vertical: 12,
-                      ),
-                      backgroundColor: AppColors.primaryButtonBackground,
-                      foregroundColor: AppColors.primaryButtonForeground,
-                    ),
-                  ),
-                ],
-              ),
-            );
+      body: FutureBuilder<void>(
+        future: Future.microtask(() {
+          // Lade die Config für diese ID wenn noch nicht geladen
+          if (context.read<SyncProvider>().config?.id != widget.configId) {
+            context.read<SyncProvider>().loadConfigById(widget.configId);
           }
+        }),
+        builder: (context, snapshot) {
+          return Consumer<SyncProvider>(
+            builder: (context, syncProvider, _) {
+              // Wenn die falsche Config geladen ist, warte
+              if (syncProvider.config?.id != widget.configId) {
+                return const Center(
+                  child: CircularProgressIndicator(),
+                );
+              }
 
-          return SingleChildScrollView(
+              if (syncProvider.config == null) {
+                return Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.folder_off,
+                        size: 64,
+                        color: Colors.grey,
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'No Configuration Found',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const ConfigScreen(configId: null),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.settings),
+                        label: const Text('Configure WebDAV'),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 32,
+                            vertical: 12,
+                          ),
+                          backgroundColor: AppColors.primaryButtonBackground,
+                          foregroundColor: AppColors.primaryButtonForeground,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              return SingleChildScrollView(
             padding: const EdgeInsets.all(16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -288,7 +313,7 @@ class _SyncScreenState extends State<SyncScreen> {
                   onPressed: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(
-                        builder: (_) => ConfigScreen(configToEdit: syncProvider.config),
+                        builder: (_) => ConfigScreen(configId: syncProvider.config?.id),
                       ),
                     );
                   },
@@ -302,6 +327,8 @@ class _SyncScreenState extends State<SyncScreen> {
               ],
             ),
           );
+        },
+      );
         },
       ),
     );
