@@ -28,13 +28,13 @@ class FileHashDatabase {
         final content = await file.readAsString();
         final json = jsonDecode(content) as Map<String, dynamic>;
         _hashes = Map<String, String>.from(json['hashes'] ?? {});
-        logger.d('Hash-Datenbank geladen: ${_hashes.length} Einträge');
+        logger.i('✅ Hash-Datenbank geladen: ${_hashes.length} Einträge von $hashDatabasePath');
       } else {
-        logger.d('Keine Hash-Datenbank gefunden, starte mit leerer Datenbank');
+        logger.i('ℹ️ Keine Hash-Datenbank gefunden, starte mit leerer Datenbank: $hashDatabasePath');
         _hashes = {};
       }
     } catch (e) {
-      logger.e('Fehler beim Laden der Hash-Datenbank: $e', error: e);
+      logger.e('❌ Fehler beim Laden der Hash-Datenbank: $e', error: e);
       _hashes = {};
     }
   }
@@ -47,10 +47,13 @@ class FileHashDatabase {
       final file = File(hashDatabasePath);
       final directory = Directory(path.dirname(hashDatabasePath));
       
+      // Erstelle Verzeichnis mit vollen Rechten
       if (!await directory.exists()) {
+        logger.i('📁 Erstelle Verzeichnis für Hash-DB: ${directory.path}');
         await directory.create(recursive: true);
       }
 
+      // Schreibe Datei
       final json = {
         'version': 1,
         'configId': configId,
@@ -59,10 +62,11 @@ class FileHashDatabase {
       };
 
       await file.writeAsString(jsonEncode(json), flush: true);
-      logger.d('Hash-Datenbank gespeichert: ${_hashes.length} Einträge');
+      logger.d('✅ Hash-Datenbank gespeichert: ${_hashes.length} Einträge in $hashDatabasePath');
       _isDirty = false;
     } catch (e) {
-      logger.e('Fehler beim Speichern der Hash-Datenbank: $e', error: e);
+      logger.e('❌ Fehler beim Speichern der Hash-Datenbank: $e', error: e);
+      rethrow;
     }
   }
 

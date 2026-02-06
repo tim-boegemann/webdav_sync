@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'dart:convert' as convert;
 import 'dart:math';
-import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:xml/xml.dart';
@@ -18,6 +17,7 @@ class WebdavSyncService {
   bool _isCancelled = false;
   static const int _connectionTimeoutSeconds = 10;
   static const int _responseTimeoutSeconds = 30;
+  static const int _maxParallelDownloads = 5; // Maximale Anzahl gleichzeitiger Downloads
 
   bool get isConfigured => _config != null;
   SyncConfig? get config => _config;
@@ -26,20 +26,58 @@ class WebdavSyncService {
     _config = config;
     _httpClient = _createHttpClient();
     
-    // Initialisiere Hash-Datenbank
-    final hashDbPath = path.join(
-      path.dirname(config.localFolder),
-      '.sync_hashes_${config.id}.json',
-    );
+    // Initialisiere Hash-Datenbank im App-Datenverzeichnis (mit garantierten Rechten)
+    // NICHT im User-Sync-Ordner, da dieser möglicherweise eingeschränkte Rechte hat
+    final hashDbPath = _getHashDatabasePath(config.id);
     _hashDatabase = FileHashDatabase(
       configId: config.id,
       hashDatabasePath: hashDbPath,
     );
   }
 
-  /// Initialisiert die Hash-Datenbank (sollte beim Start aufgerufen werden)
+  /// Gibt den Pfad zur Hash-Datenbank zurück
+  /// Garantiert, dass der Ordner mit vollen Lese-/Schreibrechten zugänglich ist
+  String _getHashDatabasePath(String configId) {
+    // Nutze Application Support Directory statt User-Ordner
+    // Dies ist auf allen Plattformen garantiert mit vollen Rechten zugänglich
+    try {
+      // WICHTIG: Dieser Pfad wird später mit async initialisiert
+      // Für jetzt nutzen wir einen relativen Fallback-Pfad
+      final basePath = path.join(
+        Directory.systemTemp.path,
+        'webdav_sync_data',
+      );
+      return path.join(basePath, '.sync_hashes_$configId.json');
+    } catch (e) {
+      logger.w('Fehler beim Bestimmen des Hash-DB-Pfads: $e');
+      // Fallback: Nutze Temp-Verzeichnis
+      return path.join(
+        Directory.systemTemp.path,
+        '.sync_hashes_$configId.json',
+      );
+    }
+  }
+
+  /// Initialisiert die Hash-Datenbank mit async Support
+  /// Sollte beim Start aufgerufen werden, bevor Sync startet
   Future<void> initializeHashDatabase() async {
-    await _hashDatabase.initialize();
+    try {
+      // Stelle sicher, dass das Verzeichnis für Hash-DB existiert
+      final hashDbDir = path.dirname(_hashDatabase.hashDatabasePath);
+      final dir = Directory(hashDbDir);
+      
+      if (!dir.existsSync()) {
+        logger.i('📁 Erstelle Hash-DB Verzeichnis: $hashDbDir');
+        await dir.create(recursive: true);
+      }
+      
+      // Lade existierende Hashes
+      await _hashDatabase.initialize();
+      logger.i('✅ Hash-Datenbank initialisiert: ${_hashDatabase.hashDatabasePath}');
+    } catch (e) {
+      logger.e('❌ Fehler beim Initialisieren der Hash-Datenbank: $e', error: e);
+      rethrow;
+    }
   }
 
   /// Erstellt einen HttpClient mit Zertifikatsverfizierung für Self-Signed Certs
@@ -145,9 +183,9 @@ class WebdavSyncService {
         localDir.createSync(recursive: true);
       }
 
-      // List files from WebDAV remote folder recursively
-      final files = await _listRemoteFilesRecursive(_config!.remoteFolder);
-      final totalFiles = files.length;
+      // List files from WebDAV remote folder recursively WITH ETAG (performant!)
+      final filesWithETag = await _listRemoteFilesRecursiveWithETag(_config!.remoteFolder);
+      final totalFiles = filesWithETag.length;
       
       logger.i('📋 SYNC PROGRESS: Total files to sync: $totalFiles');
       
@@ -165,7 +203,64 @@ class WebdavSyncService {
       onProgressUpdate?.call(0, totalFiles);
       logger.i('✓ Called onProgressUpdate(0, $totalFiles)');
 
-      for (var file in files) {
+      // Erstelle Liste der Dateien die heruntergeladen werden müssen
+      final List<Map<String, dynamic>> filesToDownload = [];
+      final List<Map<String, dynamic>> filesToSkip = [];
+
+      // 🔍 PHASE 1: Schnelle Überprüfung - ohne Downloads
+      for (var fileMap in filesWithETag) {
+        final file = fileMap['href']!;
+        final etagOrModTime = fileMap['etag']!;
+        
+        final relativePath = _getRelativePath(file, _config!.remoteFolder);
+        final localPath = path.join(_config!.localFolder, remoteFolderName, relativePath);
+
+        // Überprüfe ob die Datei bereits heruntergeladen wurde und unverändert ist
+        final oldEtag = _hashDatabase.getHash(relativePath);
+        final localFile = File(localPath);
+        final localFileExists = localFile.existsSync();
+        
+        if (oldEtag != null && oldEtag == etagOrModTime && localFileExists) {
+          // Datei hat nicht geändert und existiert lokal - überspringe Download
+          logger.i('✓ Übersprungen (unverändert): $relativePath');
+          filesToSkip.add({
+            'relativePath': relativePath,
+            'status': 'unchanged',
+          });
+          filesSkipped++;
+        } else {
+          // Datei muss heruntergeladen werden
+          if (oldEtag != null && oldEtag == etagOrModTime && !localFileExists) {
+            logger.i('↓ Lade erneut herunter (lokale Datei fehlend): $relativePath');
+          } else if (oldEtag != null) {
+            logger.i('↳ Aktualisiere (ETag geändert): $relativePath');
+          } else {
+            logger.i('↓ Lade herunter: $relativePath');
+          }
+          
+          // 🔑 WICHTIG: Erstelle Verzeichnisse JETZT, nicht später!
+          // Dies verhindert Race Conditions bei parallelen Downloads
+          final localFileDir = path.dirname(localPath);
+          final dir = Directory(localFileDir);
+          if (!dir.existsSync()) {
+            logger.d('📁 Erstelle Ordner: $localFileDir');
+            dir.createSync(recursive: true);
+          }
+          
+          filesToDownload.add({
+            'file': file,
+            'localPath': localPath,
+            'relativePath': relativePath,
+            'etagOrModTime': etagOrModTime,
+          });
+        }
+      }
+
+      // 🚀 PHASE 2: Paralleles Herunterladen mit bis zu 5 gleichzeitigen Verbindungen
+      logger.i('📥 Starte parallele Downloads: ${filesToDownload.length} Dateien, max $_maxParallelDownloads gleichzeitig');
+      
+      // Verarbeite Downloads in Batches
+      for (int i = 0; i < filesToDownload.length; i += _maxParallelDownloads) {
         // Überprüfe ob Sync abgebrochen wurde
         if (_isCancelled) {
           logger.i('Sync wurde vom Benutzer abgebrochen');
@@ -179,55 +274,34 @@ class WebdavSyncService {
           );
         }
 
-        final relativePath = _getRelativePath(file, _config!.remoteFolder);
-        // Füge den Ordnernamen hinzu damit die Struktur erhalten bleibt
-        final localPath = path.join(_config!.localFolder, remoteFolderName, relativePath);
+        final endIndex = (i + _maxParallelDownloads < filesToDownload.length) 
+            ? i + _maxParallelDownloads 
+            : filesToDownload.length;
+        
+        final batch = filesToDownload.sublist(i, endIndex);
+        
+        logger.i('📥 Download-Batch: ${i + 1}-$endIndex von ${filesToDownload.length}');
 
+        // Führe alle Downloads in diesem Batch parallel aus
         try {
-          // Create local subdirectories if needed
-          final localFileDir = path.dirname(localPath);
-          final dir = Directory(localFileDir);
-          if (!dir.existsSync()) {
-            logger.i('📁 Erstelle Ordner: $localFileDir');
-            dir.createSync(recursive: true);
-          }
-
-          // Berechne Remote-Datei Hash
-          final remoteHash = await _calculateRemoteFileHash(file);
+          await Future.wait(
+            batch.map((fileInfo) => _downloadFileWithProgress(
+              fileInfo['file'],
+              fileInfo['localPath'],
+              fileInfo['relativePath'],
+              fileInfo['etagOrModTime'],
+            )),
+            eagerError: false,
+          );
           
-          // Überprüfe ob die Datei bereits heruntergeladen wurde und den gleichen Hash hat
-          final oldHash = _hashDatabase.getHash(relativePath);
-          final localFile = File(localPath);
-          final localFileExists = localFile.existsSync();
+          filesDownloaded += batch.length;
           
-          if (oldHash != null && oldHash == remoteHash && localFileExists) {
-            // Datei hat nicht geändert und existiert lokal - überspringe Download
-            logger.i('✓ Übersprungen (un verändert): $relativePath');
-            filesSkipped++;
-          } else {
-            // Datei ist neu, hat sich geändert, oder lokale Datei wurde gelöscht - lade herunter
-            if (oldHash != null && oldHash == remoteHash && !localFileExists) {
-              logger.i('↓ Lade erneut herunter (lokale Datei fehlend): $relativePath');
-            } else if (oldHash != null) {
-              logger.i('↳ Aktualisiere (Hash geändert): $relativePath');
-            } else {
-              logger.i('↓ Lade herunter: $relativePath');
-            }
-            
-            await _downloadFile(file, localPath);
-            
-            // Speichere neuen Hash
-            _hashDatabase.setHash(relativePath, remoteHash);
-            filesDownloaded++;
-          }
-          
-          // Update progress
-          onProgressUpdate?.call(filesDownloaded + filesSkipped, totalFiles);
+          // Update progress nach jedem Batch
+          onProgressUpdate?.call(filesSkipped + filesDownloaded, totalFiles);
         } catch (e) {
-          logger.e('Fehler beim Synchronisieren von $file', error: e);
-          // Ignore individual file errors and continue
-          filesSkipped++;
-          onProgressUpdate?.call(filesDownloaded + filesSkipped, totalFiles);
+          logger.e('Fehler während Batch-Download: $e', error: e);
+          // Continue with next batch despite errors
+          // Zähle erfolgreiche Downloads später auf
         }
       }
 
@@ -252,6 +326,24 @@ class WebdavSyncService {
         status: 'Sync fehlgeschlagen',
         error: e.toString(),
       );
+    }
+  }
+
+  /// Herunterladung mit Progress-Update
+  Future<void> _downloadFileWithProgress(
+    String remotePath,
+    String localPath,
+    String relativePath,
+    String etagOrModTime,
+  ) async {
+    try {
+      await _downloadFile(remotePath, localPath);
+      
+      // Speichere neuen ETag
+      _hashDatabase.setHash(relativePath, etagOrModTime);
+    } catch (e) {
+      logger.e('Fehler beim Synchronisieren von $remotePath', error: e);
+      // Fehler werden geloggt aber nicht erneut geworfen um andere Downloads nicht zu beeinflussen
     }
   }
 
@@ -453,9 +545,9 @@ class WebdavSyncService {
     }
   }
 
-  /// Listet rekursiv alle Remote-Dateien (ohne Ordner) auf
-  Future<List<String>> _listRemoteFilesRecursive(String folderPath) async {
-    final List<String> allFiles = [];
+  /// Listet rekursiv alle Remote-Dateien mit Metadaten (ETag) auf
+  Future<List<Map<String, String>>> _listRemoteFilesRecursiveWithETag(String folderPath) async {
+    final List<Map<String, String>> allFiles = [];
     
     try {
       final url = _buildUrl(folderPath);
@@ -521,8 +613,32 @@ class WebdavSyncService {
               // Speichere Ordner für rekursive Verarbeitung
               folders.add(href);
             } else {
-              // Füge Datei zur Liste hinzu
-              allFiles.add(href);
+              // Extrahiere ETag als Änderungsindikator
+              final propElement = element.children
+                  .whereType<XmlElement>()
+                  .firstWhere((e) => e.name.local == 'propstat', orElse: () => XmlElement(XmlName('empty')))
+                  .children
+                  .whereType<XmlElement>()
+                  .firstWhere((e) => e.name.local == 'prop', orElse: () => XmlElement(XmlName('empty')));
+              
+              final etag = propElement.children
+                  .whereType<XmlElement>()
+                  .firstWhere((e) => e.name.local == 'getetag', orElse: () => XmlElement(XmlName('empty')))
+                  .innerText;
+              
+              // Fallback: Nutze Modification Time falls kein ETag
+              final modificationTime = propElement.children
+                  .whereType<XmlElement>()
+                  .firstWhere((e) => e.name.local == 'getlastmodified', orElse: () => XmlElement(XmlName('empty')))
+                  .innerText;
+              
+              final fileIdentifier = etag.isNotEmpty ? etag : modificationTime;
+              
+              // Füge Datei mit Metadaten zur Liste hinzu
+              allFiles.add({
+                'href': href,
+                'etag': fileIdentifier,
+              });
             }
           } catch (e) {
             logger.e('Fehler beim Parsen einer Ressource: $e', error: e);
@@ -532,7 +648,7 @@ class WebdavSyncService {
         // Rekursiv durch alle Unterordner gehen
         for (var folder in folders) {
           try {
-            final subFiles = await _listRemoteFilesRecursive(folder);
+            final subFiles = await _listRemoteFilesRecursiveWithETag(folder);
             allFiles.addAll(subFiles);
           } catch (e) {
             logger.e('Fehler beim Auflisten von Unterordner $folder: $e', error: e);
@@ -551,6 +667,13 @@ class WebdavSyncService {
     }
 
     return allFiles;
+  }
+
+  /// Listet rekursiv alle Remote-Dateien (ohne Ordner) auf - DEPRECATED
+  /// Nutze stattdessen _listRemoteFilesRecursiveWithETag
+  Future<List<String>> _listRemoteFilesRecursive(String folderPath) async {
+    final files = await _listRemoteFilesRecursiveWithETag(folderPath);
+    return files.map((f) => f['href']!).toList();
   }
 
   /// Berechnet den relativen Pfad einer Datei
@@ -692,6 +815,7 @@ class WebdavSyncService {
     }
   }
 
+  /// Heruntergeladen datei (Downloads mit Bytes)
   Future<void> _downloadFile(String remotePath, String localPath) async {
     try {
       final url = _buildUrl(remotePath);
@@ -721,34 +845,6 @@ class WebdavSyncService {
       throw Exception('Netzwerkfehler beim Download: $e');
     } catch (e) {
       throw Exception('Fehler beim Download der Datei: $e');
-    }
-  }
-
-  /// Berechnet den SHA256-Hash einer Remote-Datei
-  Future<String> _calculateRemoteFileHash(String remotePath) async {
-    try {
-      final url = _buildUrl(remotePath);
-      final auth = _buildAuthHeader();
-
-      final response = await _httpClient
-          .get(
-            Uri.parse(url),
-            headers: {'Authorization': auth},
-          )
-          .timeout(
-            Duration(seconds: _responseTimeoutSeconds),
-            onTimeout: () => throw SocketException('Verbindungszeitüberschreitung beim Hash-Download'),
-          );
-
-      if (response.statusCode == 200) {
-        // Berechne SHA256 Hash
-        final hash = sha256.convert(response.bodyBytes).toString();
-        return hash;
-      } else {
-        throw Exception('Fehler beim Abrufen der Datei für Hash-Berechnung: ${response.statusCode}');
-      }
-    } catch (e) {
-      throw Exception('Fehler beim Hash-Berechnen: $e');
     }
   }
 

@@ -1,18 +1,34 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'credentials_service.dart';
 import '../models/sync_config.dart';
 import '../models/sync_status.dart';
+import '../utils/logger.dart';
 
 class ConfigService {
   static const String _configsKey = 'sync_configs_list';
   static const String _selectedConfigKey = 'selected_config_id';
+  
+  final CredentialsService _credentialsService;
 
-  /// Speichert eine einzelne Konfiguration
+  ConfigService({CredentialsService? credentialsService})
+    : _credentialsService = credentialsService ?? CredentialsService();
+
+  /// Speichert eine einzelne Konfiguration (Passwort wird separat gespeichert)
   Future<void> saveConfig(SyncConfig config) async {
     final prefs = await SharedPreferences.getInstance();
     final configs = await getAllConfigs();
     
-    // Ersetze oder füge neue Config hinzu
+    // Speichere Passwort sicher
+    if (config.password.isNotEmpty) {
+      await _credentialsService.saveCredentials(
+        configId: config.id,
+        username: config.username,
+        password: config.password,
+      );
+    }
+    
+    // Ersetze oder füge neue Config hinzu (OHNE Passwort)
     final index = configs.indexWhere((c) => c.id == config.id);
     if (index >= 0) {
       configs[index] = config;
@@ -20,9 +36,11 @@ class ConfigService {
       configs.add(config);
     }
     
-    // Speichere alle Configs
+    // Speichere alle Configs (Passwort wird NICHT gespeichert)
     final jsonList = jsonEncode(configs.map((c) => c.toMap()).toList());
     await prefs.setString(_configsKey, jsonList);
+    
+    logger.i('✅ Konfiguration gespeichert: ${config.name} (Passwort in CredentialsService)');
   }
 
   /// Lädt alle Konfigurationen
@@ -38,19 +56,43 @@ class ConfigService {
   }
 
   /// Lädt eine einzelne Konfiguration nach ID
+  /// 🔒 Lädt auch das Passwort aus CredentialsService
   Future<SyncConfig?> loadConfig(String id) async {
     final configs = await getAllConfigs();
     try {
-      return configs.firstWhere((c) => c.id == id);
+      var config = configs.firstWhere((c) => c.id == id);
+      
+      // Lade Passwort aus sicherer Speicherung
+      final credentials = await _credentialsService.getCredentials(id);
+      if (credentials.password != null) {
+        config = SyncConfig(
+          id: config.id,
+          name: config.name,
+          webdavUrl: config.webdavUrl,
+          username: credentials.username ?? config.username,
+          password: credentials.password ?? '',
+          remoteFolder: config.remoteFolder,
+          localFolder: config.localFolder,
+          syncIntervalMinutes: config.syncIntervalMinutes,
+          autoSync: config.autoSync,
+          syncDaysOfWeek: config.syncDaysOfWeek,
+          syncTime: config.syncTime,
+        );
+      }
+      
+      return config;
     } catch (e) {
       return null;
     }
   }
 
-  /// Löscht eine Konfiguration
+  /// Löscht eine Konfiguration (inkl. Passwort)
   Future<void> deleteConfig(String id) async {
     final configs = await getAllConfigs();
     configs.removeWhere((c) => c.id == id);
+    
+    // Lösche Passwort aus CredentialsService
+    await _credentialsService.deleteCredentials(id);
     
     final prefs = await SharedPreferences.getInstance();
     if (configs.isEmpty) {
@@ -63,6 +105,8 @@ class ConfigService {
     
     // Lösche auch den gespeicherten SyncStatus für diese Config
     await deleteSyncStatus(id);
+    
+    logger.i('✅ Konfiguration gelöscht (inkl. Passwort): $id');
   }
 
   /// Löscht den gespeicherten SyncStatus einer Konfiguration

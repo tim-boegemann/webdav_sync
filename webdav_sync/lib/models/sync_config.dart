@@ -3,6 +3,10 @@ class SyncConfig {
   final String name;
   final String webdavUrl;
   final String username;
+  // ⚠️ WICHTIG: Passwort wird NICHT hier gespeichert!
+  // Siehe: CredentialsService für sichere Speicherung
+  // Das Passwort wird nur im Memory gehalten während der App läuft
+  @Deprecated('Nutze CredentialsService stattdessen')
   final String password;
   final String remoteFolder;
   final String localFolder;
@@ -16,7 +20,7 @@ class SyncConfig {
     required this.name,
     required this.webdavUrl,
     required this.username,
-    required this.password,
+    @Deprecated('Nutze CredentialsService stattdessen') this.password = '',
     required this.remoteFolder,
     required this.localFolder,
     this.syncIntervalMinutes = 15,
@@ -31,7 +35,7 @@ class SyncConfig {
       'name': name,
       'webdavUrl': webdavUrl,
       'username': username,
-      'password': password,
+      // 🔒 KEIN PASSWORT! Wird separat in CredentialsService gespeichert
       'remoteFolder': remoteFolder,
       'localFolder': localFolder,
       'syncIntervalMinutes': syncIntervalMinutes,
@@ -47,7 +51,7 @@ class SyncConfig {
       name: map['name'] ?? 'Unnamed Config',
       webdavUrl: map['webdavUrl'] ?? '',
       username: map['username'] ?? '',
-      password: map['password'] ?? '',
+      password: '', // 🔒 Passwort wird von CredentialsService geladen
       remoteFolder: map['remoteFolder'] ?? '',
       localFolder: map['localFolder'] ?? '',
       syncIntervalMinutes: map['syncIntervalMinutes'] ?? 15,

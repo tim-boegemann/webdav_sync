@@ -44,11 +44,11 @@ dependencies:
   # Local storage and shared preferences
   shared_preferences: ^2.0.0
   
+  # 🔒 SICHER: Verschlüsselte Speicherung für Passwörter
+  flutter_secure_storage: ^9.0.0
+  
   # HTTP client for WebDAV operations
   http: ^1.0.0
-  
-  # Cryptographic functions for hash calculation
-  crypto: ^3.0.0
   
   # XML parsing
   xml: ^6.0.0
