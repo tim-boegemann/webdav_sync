@@ -2,8 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'providers/sync_provider.dart';
 import 'screens/config_list_screen.dart';
+import 'utils/crash_logger.dart';
 
 void main() {
+  // 🔴 Registriere Crash-Handler für unerwartete Fehler
+  FlutterError.onError = (FlutterErrorDetails details) {
+    CrashLogger.logCrash(
+      details.exception,
+      details.stack ?? StackTrace.current,
+      context: 'FlutterError: ${details.context?.toString() ?? "Unknown"}',
+    );
+    
+    // Zeige Error-Dialog für User
+    FlutterError.dumpErrorToConsole(details);
+  };
+  
   runApp(const MyApp());
 }
 

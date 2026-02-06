@@ -377,7 +377,6 @@ class WebdavSyncService {
 
       logger.i('==== REMOTE FOLDER LISTING AT $baseUrl ====');
       logger.i('Base URL: $baseUrl');
-      logger.i('Auth Header: ${auth.substring(0, 20)}...');
 
       final request = http.Request('PROPFIND', Uri.parse(baseUrl))
         ..headers['Authorization'] = auth
