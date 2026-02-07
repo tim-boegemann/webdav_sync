@@ -38,7 +38,7 @@ class SyncProvider extends ChangeNotifier {
     // Initialisiere Shortcuts asynchron um Crashes zu vermeiden
     _initializeShortcutsAsync();
   }
-  
+
   /// Initialisiere Shortcuts asynchron (sicherer für App-Start)
   Future<void> _initializeShortcutsAsync() async {
     try {
@@ -62,33 +62,38 @@ class SyncProvider extends ChangeNotifier {
     ShortcutsHandler.onShortcutCommand = (command, params) async {
       await _handleShortcutCommand(command, params);
     };
-    
+
     // Registriere Background Fetch Handler
     ShortcutsHandler.onBackgroundFetch = _handleBackgroundFetch;
   }
 
   /// Handle Shortcuts-Befehle von iOS App Intents
-  Future<void> _handleShortcutCommand(String command, Map<String, String> params) async {
+  Future<void> _handleShortcutCommand(
+    String command,
+    Map<String, String> params,
+  ) async {
     logger.i('🎯 SHORTCUT COMMAND EMPFANGEN: $command mit Params: $params');
-    
+
     final cmd = parseShortcutCommand(command);
-    
+
     switch (cmd) {
       case ShortcutCommand.syncAll:
         logger.i('🔄 Starte Shortcut: Synchronisiere alle Konfigurationen');
         await _syncAllConfigs();
         logger.i('✅ Shortcut: Alle Konfigurationen synchronisiert');
         break;
-        
+
       case ShortcutCommand.syncConfig:
         final configName = params['configName'];
-        logger.i('🔄 Starte Shortcut: Synchronisiere Konfiguration: $configName');
+        logger.i(
+          '🔄 Starte Shortcut: Synchronisiere Konfiguration: $configName',
+        );
         if (configName != null) {
           await _syncConfigByName(configName);
         }
         logger.i('✅ Shortcut: Konfiguration $configName synchronisiert');
         break;
-        
+
       case ShortcutCommand.getStatus:
         logger.i('📊 Shortcut: Zeige Status');
         _printSyncStatus();
@@ -99,11 +104,11 @@ class SyncProvider extends ChangeNotifier {
   /// Synchronisiere alle Konfigurationen nacheinander
   Future<void> _syncAllConfigs() async {
     logger.i('Synchronisiere alle ${_allConfigs.length} Konfigurationen');
-    
+
     for (final config in _allConfigs) {
       await setCurrentConfig(config);
       await performSync();
-      
+
       // Zeige Statistiken
       if (_syncStatus != null) {
         logger.i('✅ Sync für "${config.name}" abgeschlossen:');
@@ -118,7 +123,7 @@ class SyncProvider extends ChangeNotifier {
         logger.w('⚠️  Sync für "${config.name}" - Kein Status verfügbar');
       }
     }
-    
+
     logger.i('✅✅✅ Alle Synchronisierungen abgeschlossen ✅✅✅');
   }
 
@@ -127,10 +132,10 @@ class SyncProvider extends ChangeNotifier {
     try {
       final config = _allConfigs.firstWhere((c) => c.name == configName);
       logger.i('Synchronisiere Config: $configName');
-      
+
       await setCurrentConfig(config);
       await performSync();
-      
+
       // Zeige Statistiken
       if (_syncStatus != null) {
         logger.i('✅ Sync für "$configName" abgeschlossen:');
@@ -167,18 +172,18 @@ class SyncProvider extends ChangeNotifier {
   Future<bool> _handleBackgroundFetch() async {
     try {
       logger.i('Background Fetch - Starte Synchronisierung aller Configs');
-      
+
       // Lade aktuelle Configs
       await _loadConfigs();
-      
+
       // Synchronisiere alle Configs
       if (_allConfigs.isEmpty) {
         logger.w('Keine Configs zum Synchronisieren vorhanden');
         return false;
       }
-      
+
       await _syncAllConfigs();
-      
+
       logger.i('Background Fetch - Alle Syncs abgeschlossen');
       return true;
     } catch (e) {
@@ -189,28 +194,28 @@ class SyncProvider extends ChangeNotifier {
 
   Future<void> _loadConfigs() async {
     _allConfigs = await _configService.getAllConfigs();
-    
+
     // Lade die letzte ausgewählte Config oder die erste
     final selectedId = await _configService.getSelectedConfigId();
     if (selectedId != null) {
       _config = await _configService.loadConfig(selectedId);
     }
-    
+
     // Falls keine gültige Config, nutze die erste
     if (_config == null && _allConfigs.isNotEmpty) {
       _config = _allConfigs.first;
       await _configService.setSelectedConfigId(_config!.id);
     }
-    
+
     if (_config != null) {
       _syncService.initialize(_config!);
       await _syncService.initializeHashDatabase();
       _validationError = _syncService.validateConfig();
-      
+
       // Lade den SyncStatus für diese Config
       _syncStatus = await _configService.getLastSyncStatus(_config!.id);
     }
-    
+
     notifyListeners();
   }
 
@@ -223,21 +228,21 @@ class SyncProvider extends ChangeNotifier {
     // 🔐 WICHTIG: Lade Config mit Passwort aus SecureStorage neu!
     final configWithPassword = await _configService.loadConfig(config.id);
     if (configWithPassword != null) {
-      _config = configWithPassword;  // Mit aktualisiertem Passwort
+      _config = configWithPassword; // Mit aktualisiertem Passwort
       logger.d('✅ Config mit Passwort geladen: ${_config!.name}');
     } else {
-      _config = config;  // Fallback - aber ohne Passwort
+      _config = config; // Fallback - aber ohne Passwort
       logger.w('⚠️ Config konnte nicht mit Passwort geladen werden!');
     }
-    
+
     await _configService.setSelectedConfigId(config.id);
     _syncService.initialize(_config!);
     await _syncService.initializeHashDatabase();
     _validationError = _syncService.validateConfig();
-    
+
     // Lade den SyncStatus für diese Config
     _syncStatus = await _configService.getLastSyncStatus(config.id);
-    
+
     notifyListeners();
   }
 
@@ -250,10 +255,10 @@ class SyncProvider extends ChangeNotifier {
         _syncService.initialize(config);
         await _syncService.initializeHashDatabase();
         _validationError = _syncService.validateConfig();
-        
+
         // Lade den SyncStatus für diese Config
         _syncStatus = await _configService.getLastSyncStatus(config.id);
-        
+
         notifyListeners();
       }
     } catch (e) {
@@ -264,17 +269,17 @@ class SyncProvider extends ChangeNotifier {
   Future<void> saveConfig(SyncConfig config) async {
     // Speichere die Config in jedem Fall
     await _configService.saveConfig(config);
-    
+
     // Aktualisiere die Liste
     _allConfigs = await _configService.getAllConfigs();
-    
+
     // Nur wenn nicht gerade ein Sync läuft, wechsle zur neuen Config
     if (!_isLoading) {
       _config = config;
       _syncService.initialize(config);
       await _syncService.initializeHashDatabase();
       _validationError = _syncService.validateConfig();
-      
+
       // Lade den bestehenden SyncStatus für diese Config (nicht null setzen!)
       _syncStatus = await _configService.getLastSyncStatus(config.id);
     } else {
@@ -282,14 +287,14 @@ class SyncProvider extends ChangeNotifier {
       logger.i('Sync läuft noch, aktualisiere nur die Config in der Liste');
       // Die aktuelle Config bleibt erhalten bis der Sync abgeschlossen ist
     }
-    
+
     notifyListeners();
   }
 
   Future<void> deleteConfig(String id) async {
     await _configService.deleteConfig(id);
     _allConfigs = await _configService.getAllConfigs();
-    
+
     // Wenn die gelöschte Config die aktuelle war, wähle eine andere
     if (_config?.id == id) {
       if (_allConfigs.isNotEmpty) {
@@ -301,7 +306,7 @@ class SyncProvider extends ChangeNotifier {
       }
       _validationError = _syncService.validateConfig();
     }
-    
+
     notifyListeners();
   }
 
@@ -340,12 +345,14 @@ class SyncProvider extends ChangeNotifier {
 
     _syncStatus = await _syncService.performSync();
     await _configService.setLastSyncTime(_syncStatus!.lastSyncTime);
-    
+
     // Berechne die nächste geplante Sync-Zeit, wenn Auto Sync aktiviert ist
     if (_config!.autoSync) {
       try {
         final lastSyncTime = DateTime.parse(_syncStatus!.lastSyncTime);
-        final nextSyncTime = lastSyncTime.add(Duration(minutes: _config!.syncIntervalMinutes));
+        final nextSyncTime = lastSyncTime.add(
+          Duration(minutes: _config!.syncIntervalMinutes),
+        );
         _syncStatus = SyncStatus(
           issyncing: _syncStatus!.issyncing,
           lastSyncTime: _syncStatus!.lastSyncTime,
@@ -359,7 +366,7 @@ class SyncProvider extends ChangeNotifier {
         logger.e('Fehler beim Berechnen der nächsten Sync-Zeit: $e', error: e);
       }
     }
-    
+
     // Speichere kompletten SyncStatus persistent pro Config
     await _configService.saveSyncStatus(_syncStatus!, _config!.id);
 
@@ -389,7 +396,7 @@ class SyncProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
-    
+
     final result = await _syncService.testConnection();
     notifyListeners();
     return result;
@@ -445,14 +452,18 @@ class SyncProvider extends ChangeNotifier {
     try {
       // Nutze die gespeicherte nextScheduledSyncTime falls vorhanden
       if (_syncStatus!.nextScheduledSyncTime != null) {
-        final nextSyncTime = DateTime.parse(_syncStatus!.nextScheduledSyncTime!);
+        final nextSyncTime = DateTime.parse(
+          _syncStatus!.nextScheduledSyncTime!,
+        );
         return '${nextSyncTime.day.toString().padLeft(2, '0')}.${nextSyncTime.month.toString().padLeft(2, '0')}.${nextSyncTime.year} ${nextSyncTime.hour.toString().padLeft(2, '0')}:${nextSyncTime.minute.toString().padLeft(2, '0')}';
       }
-      
+
       // Fallback: Berechne die nächste Sync-Zeit basierend auf letztem Sync + Intervall
       final lastSyncTime = DateTime.parse(_syncStatus!.lastSyncTime);
-      final nextSyncTime = lastSyncTime.add(Duration(minutes: _config!.syncIntervalMinutes));
-      
+      final nextSyncTime = lastSyncTime.add(
+        Duration(minutes: _config!.syncIntervalMinutes),
+      );
+
       return '${nextSyncTime.day.toString().padLeft(2, '0')}.${nextSyncTime.month.toString().padLeft(2, '0')}.${nextSyncTime.year} ${nextSyncTime.hour.toString().padLeft(2, '0')}:${nextSyncTime.minute.toString().padLeft(2, '0')}';
     } catch (e) {
       logger.e('Fehler beim Berechnen der nächsten Sync-Zeit: $e', error: e);
@@ -461,7 +472,10 @@ class SyncProvider extends ChangeNotifier {
   }
 
   /// Berechnet die nächste geplante Sync-Zeit für eine beliebige Config
-  Future<String> getNextSyncTimeForConfig(SyncConfig config, SyncStatus? syncStatus) async {
+  Future<String> getNextSyncTimeForConfig(
+    SyncConfig config,
+    SyncStatus? syncStatus,
+  ) async {
     if (!config.autoSync || syncStatus == null) {
       return '-';
     }
@@ -477,14 +491,19 @@ class SyncProvider extends ChangeNotifier {
         final nextSyncTime = DateTime.parse(syncStatus.nextScheduledSyncTime!);
         return '${nextSyncTime.day.toString().padLeft(2, '0')}.${nextSyncTime.month.toString().padLeft(2, '0')}.${nextSyncTime.year} ${nextSyncTime.hour.toString().padLeft(2, '0')}:${nextSyncTime.minute.toString().padLeft(2, '0')}';
       }
-      
+
       // Fallback: Berechne die nächste Sync-Zeit basierend auf letztem Sync + Intervall
       final lastSyncTime = DateTime.parse(syncStatus.lastSyncTime);
-      final nextSyncTime = lastSyncTime.add(Duration(minutes: config.syncIntervalMinutes));
-      
+      final nextSyncTime = lastSyncTime.add(
+        Duration(minutes: config.syncIntervalMinutes),
+      );
+
       return '${nextSyncTime.day.toString().padLeft(2, '0')}.${nextSyncTime.month.toString().padLeft(2, '0')}.${nextSyncTime.year} ${nextSyncTime.hour.toString().padLeft(2, '0')}:${nextSyncTime.minute.toString().padLeft(2, '0')}';
     } catch (e) {
-      logger.e('Fehler beim Berechnen der nächsten Sync-Zeit für ${config.name}: $e', error: e);
+      logger.e(
+        'Fehler beim Berechnen der nächsten Sync-Zeit für ${config.name}: $e',
+        error: e,
+      );
       return '-';
     }
   }
@@ -493,17 +512,24 @@ class SyncProvider extends ChangeNotifier {
   String _getNextScheduledSyncTime(SyncConfig config) {
     final timeParts = config.syncTime.split(':');
     final scheduledHour = int.tryParse(timeParts[0]) ?? 9;
-    final scheduledMinute = int.tryParse(timeParts.length > 1 ? timeParts[1] : '0') ?? 0;
-    
+    final scheduledMinute =
+        int.tryParse(timeParts.length > 1 ? timeParts[1] : '0') ?? 0;
+
     // Starte mit heute
     DateTime nextSync = DateTime.now();
-    nextSync = DateTime(nextSync.year, nextSync.month, nextSync.day, scheduledHour, scheduledMinute);
-    
+    nextSync = DateTime(
+      nextSync.year,
+      nextSync.month,
+      nextSync.day,
+      scheduledHour,
+      scheduledMinute,
+    );
+
     // Wenn die Zeit heute schon vorbei ist, starte mit morgen
     if (nextSync.isBefore(DateTime.now())) {
       nextSync = nextSync.add(const Duration(days: 1));
     }
-    
+
     // Finde den nächsten Tag, der in der syncDaysOfWeek-Liste ist
     // Dart: 1=Montag, ..., 7=Sonntag
     // DateTime: 1=Montag, ..., 7=Sonntag
@@ -515,7 +541,7 @@ class SyncProvider extends ChangeNotifier {
       nextSync = nextSync.add(const Duration(days: 1));
       maxAttempts--;
     }
-    
+
     return '${nextSync.day.toString().padLeft(2, '0')}.${nextSync.month.toString().padLeft(2, '0')}.${nextSync.year} ${nextSync.hour.toString().padLeft(2, '0')}:${nextSync.minute.toString().padLeft(2, '0')}';
   }
 
@@ -527,7 +553,7 @@ class SyncProvider extends ChangeNotifier {
   /// Starte den Auto-Sync-Timer der regelmäßig überprüft, ob ein Sync notwendig ist
   void _startAutoSyncTimer() {
     logger.i('SyncProvider: Starte Auto-Sync-Timer');
-    
+
     // Überprüfe alle 30 Sekunden, ob ein Auto-Sync notwendig ist
     _autoSyncTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
       await _checkAndPerformAutoSync();
@@ -553,7 +579,9 @@ class SyncProvider extends ChangeNotifier {
 
         // Wenn noch nie synced wurde, führe sofort den ersten Sync durch
         if (syncStatus == null) {
-          logger.i('SyncProvider: Führe initialen Auto-Sync für ${config.name} durch');
+          logger.i(
+            'SyncProvider: Führe initialen Auto-Sync für ${config.name} durch',
+          );
           await setCurrentConfig(config);
           await performSync();
           continue;
@@ -567,17 +595,24 @@ class SyncProvider extends ChangeNotifier {
 
           // Wenn seit dem letzten Sync genug Zeit vergangen ist, führe neuen Sync durch
           if (elapsedMinutes >= config.syncIntervalMinutes) {
-            logger.i('SyncProvider: Auto-Sync für ${config.name} fällig (${elapsedMinutes}min vergangen, Intervall: ${config.syncIntervalMinutes}min)');
+            logger.i(
+              'SyncProvider: Auto-Sync für ${config.name} fällig (${elapsedMinutes}min vergangen, Intervall: ${config.syncIntervalMinutes}min)',
+            );
             await setCurrentConfig(config);
             await performSync();
           }
         } catch (e) {
-          logger.e('Fehler beim Berechnen der verstrichenen Zeit für ${config.name}: $e', error: e);
+          logger.e(
+            'Fehler beim Berechnen der verstrichenen Zeit für ${config.name}: $e',
+            error: e,
+          );
         }
       } catch (e) {
-        logger.e('Fehler beim Auto-Sync-Check für ${config.name}: $e', error: e);
+        logger.e(
+          'Fehler beim Auto-Sync-Check für ${config.name}: $e',
+          error: e,
+        );
       }
     }
   }
 }
-

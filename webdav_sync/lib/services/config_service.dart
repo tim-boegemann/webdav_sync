@@ -8,7 +8,7 @@ import '../utils/logger.dart';
 class ConfigService {
   static const String _configsKey = 'sync_configs_list';
   static const String _selectedConfigKey = 'selected_config_id';
-  
+
   final CredentialsService _credentialsService;
 
   ConfigService({CredentialsService? credentialsService})
@@ -18,7 +18,7 @@ class ConfigService {
   Future<void> saveConfig(SyncConfig config) async {
     final prefs = await SharedPreferences.getInstance();
     final configs = await getAllConfigs();
-    
+
     // Speichere Passwort sicher
     if (config.password.isNotEmpty) {
       await _credentialsService.saveCredentials(
@@ -27,7 +27,7 @@ class ConfigService {
         password: config.password,
       );
     }
-    
+
     // Ersetze oder füge neue Config hinzu (OHNE Passwort)
     final index = configs.indexWhere((c) => c.id == config.id);
     if (index >= 0) {
@@ -35,22 +35,26 @@ class ConfigService {
     } else {
       configs.add(config);
     }
-    
+
     // Speichere alle Configs (Passwort wird NICHT gespeichert)
     final jsonList = jsonEncode(configs.map((c) => c.toMap()).toList());
     await prefs.setString(_configsKey, jsonList);
-    
-    logger.i('✅ Konfiguration gespeichert: ${config.name} (Passwort in CredentialsService)');
+
+    logger.i(
+      '✅ Konfiguration gespeichert: ${config.name} (Passwort in CredentialsService)',
+    );
   }
 
   /// Lädt alle Konfigurationen
   Future<List<SyncConfig>> getAllConfigs() async {
     final prefs = await SharedPreferences.getInstance();
     final jsonString = prefs.getString(_configsKey);
-    
+
     if (jsonString != null && jsonString.isNotEmpty) {
       final list = jsonDecode(jsonString) as List<dynamic>;
-      return list.map((item) => SyncConfig.fromMap(item as Map<String, dynamic>)).toList();
+      return list
+          .map((item) => SyncConfig.fromMap(item as Map<String, dynamic>))
+          .toList();
     }
     return [];
   }
@@ -61,12 +65,12 @@ class ConfigService {
     final configs = await getAllConfigs();
     try {
       var config = configs.firstWhere((c) => c.id == id);
-      
+
       logger.d('🔐 Lade Config mit ID: $id, Name: ${config.name}');
-      
+
       // Lade Passwort aus sicherer Speicherung
       final credentials = await _credentialsService.getCredentials(id);
-      
+
       // WICHTIG: Passwort IMMER neu laden, auch wenn null
       config = SyncConfig(
         id: config.id,
@@ -81,14 +85,18 @@ class ConfigService {
         syncDaysOfWeek: config.syncDaysOfWeek,
         syncTime: config.syncTime,
       );
-      
+
       // Debug: Zeige ob Passwort geladen wurde
       if (credentials.password != null) {
-        logger.d('✅ Passwort geladen (${credentials.password!.length} Zeichen)');
+        logger.d(
+          '✅ Passwort geladen (${credentials.password!.length} Zeichen)',
+        );
       } else {
-        logger.w('⚠️ KEINE Anmeldedaten in SecureStorage für Config $id - Passwort ist LEER!');
+        logger.w(
+          '⚠️ KEINE Anmeldedaten in SecureStorage für Config $id - Passwort ist LEER!',
+        );
       }
-      
+
       return config;
     } catch (e) {
       logger.e('❌ Fehler beim Laden von Config $id: $e');
@@ -100,10 +108,10 @@ class ConfigService {
   Future<void> deleteConfig(String id) async {
     final configs = await getAllConfigs();
     configs.removeWhere((c) => c.id == id);
-    
+
     // Lösche Passwort aus CredentialsService
     await _credentialsService.deleteCredentials(id);
-    
+
     final prefs = await SharedPreferences.getInstance();
     if (configs.isEmpty) {
       await prefs.remove(_configsKey);
@@ -112,10 +120,10 @@ class ConfigService {
       final jsonList = jsonEncode(configs.map((c) => c.toMap()).toList());
       await prefs.setString(_configsKey, jsonList);
     }
-    
+
     // Lösche auch den gespeicherten SyncStatus für diese Config
     await deleteSyncStatus(id);
-    
+
     logger.i('✅ Konfiguration gelöscht (inkl. Passwort): $id');
   }
 
@@ -167,7 +175,7 @@ class ConfigService {
   Future<SyncStatus?> getLastSyncStatus(String configId) async {
     final prefs = await SharedPreferences.getInstance();
     final jsonString = prefs.getString('sync_status_$configId');
-    
+
     if (jsonString != null && jsonString.isNotEmpty) {
       try {
         final map = jsonDecode(jsonString) as Map<String, dynamic>;

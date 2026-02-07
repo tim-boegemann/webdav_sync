@@ -29,43 +29,72 @@ class _ConfigScreenState extends State<ConfigScreen> {
   bool _showPassword = false;
   String? _lastError;
   bool _isNewConfig = false;
-  String _syncIntervalOption = 'schedule'; // hourly, daily, weekly, custom, schedule 
-  List<bool> _selectedDays = [true, true, true, true, true, false, false]; // Mo-Fr default
+  String _syncIntervalOption =
+      'schedule'; // hourly, daily, weekly, custom, schedule
+  List<bool> _selectedDays = [
+    true,
+    true,
+    true,
+    true,
+    true,
+    false,
+    false,
+  ]; // Mo-Fr default
   TimeOfDay _selectedTime = const TimeOfDay(hour: 14, minute: 0);
 
   @override
   void initState() {
     super.initState();
-    final config = widget.configId != null 
+    final config = widget.configId != null
         ? context.read<SyncProvider>().allConfigs.firstWhere(
-              (c) => c.id == widget.configId,
-              orElse: () => SyncConfig(id: '', name: '', webdavUrl: '', username: '', password: '', remoteFolder: '', localFolder: ''),
-            )
+            (c) => c.id == widget.configId,
+            orElse: () => SyncConfig(
+              id: '',
+              name: '',
+              webdavUrl: '',
+              username: '',
+              password: '',
+              remoteFolder: '',
+              localFolder: '',
+            ),
+          )
         : null;
-    
+
     _isNewConfig = config == null || config.id.isEmpty;
 
     _configNameController = TextEditingController(text: config?.name ?? '');
     _webdavUrlController = TextEditingController(text: config?.webdavUrl ?? '');
     _usernameController = TextEditingController(text: config?.username ?? '');
     _passwordController = TextEditingController(); // Wird asynchron gefüllt
-    _remoteFolderController =
-        TextEditingController(text: config?.remoteFolder ?? '');
-    _localFolderController = TextEditingController(text: config?.localFolder ?? '');
-    _syncIntervalController =
-        TextEditingController(text: (config?.syncIntervalMinutes ?? 15).toString());
+    _remoteFolderController = TextEditingController(
+      text: config?.remoteFolder ?? '',
+    );
+    _localFolderController = TextEditingController(
+      text: config?.localFolder ?? '',
+    );
+    _syncIntervalController = TextEditingController(
+      text: (config?.syncIntervalMinutes ?? 15).toString(),
+    );
     _autoSync = config?.autoSync ?? false;
-    
+
     // Lade Passwort asynchron nach dem Build
     if (!_isNewConfig && config != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _loadPasswordForConfig(config.id);
       });
     }
-    
+
     // Für neue Konfigurationen: Setze Standardwerte
     if (_isNewConfig) {
-      _selectedDays = [true, true, true, true, true, false, false]; // Mo-Fr default
+      _selectedDays = [
+        true,
+        true,
+        true,
+        true,
+        true,
+        false,
+        false,
+      ]; // Mo-Fr default
       _selectedTime = const TimeOfDay(hour: 14, minute: 0);
       _syncIntervalOption = 'schedule';
       _autoSync = false; // Wird optional mit dem Checkbox gesetzt
@@ -80,7 +109,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
           }
         }
       }
-      
+
       // Initialisiere Uhrzeit
       if (config.syncTime.isNotEmpty) {
         final timeParts = config.syncTime.split(':');
@@ -91,7 +120,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
           );
         }
       }
-      
+
       // Bestimme die Sync-Interval-Option basierend auf dem Wert
       // Priorität: schedule > hourly/daily/weekly > custom
       if (config.syncDaysOfWeek.isNotEmpty) {
@@ -109,7 +138,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
         }
       }
     }
-    
+
     // Initialisiere Default-Pfad wenn leer
     if (_localFolderController.text.isEmpty) {
       _initializeDefaultLocalPath();
@@ -144,44 +173,49 @@ class _ConfigScreenState extends State<ConfigScreen> {
         setState(() => _lastError = 'Bitte gib einen Namen für das Profil ein');
         return;
       }
-      
+
       if (_webdavUrlController.text.isEmpty) {
         setState(() => _lastError = 'Bitte gib eine WebDAV URL ein');
         return;
       }
-      
+
       if (_usernameController.text.isEmpty) {
         setState(() => _lastError = 'Bitte gib einen Benutzernamen ein');
         return;
       }
-      
+
       if (_passwordController.text.isEmpty) {
         setState(() => _lastError = 'Bitte gib ein Passwort ein');
         return;
       }
-      
+
       if (_remoteFolderController.text.isEmpty) {
         setState(() => _lastError = 'Bitte gib einen Remote-Ordner ein');
         return;
       }
-      
+
       if (_localFolderController.text.isEmpty) {
         setState(() => _lastError = 'Bitte gib einen lokalen Ordner ein');
         return;
       }
-      
+
       if (_syncIntervalOption == 'custom') {
         final interval = int.tryParse(_syncIntervalController.text);
         if (interval == null || interval <= 0) {
-          setState(() => _lastError = 'Bitte gib ein gültiges Sync-Intervall (Minuten) ein');
+          setState(
+            () => _lastError =
+                'Bitte gib ein gültiges Sync-Intervall (Minuten) ein',
+          );
           return;
         }
       }
-      
+
       if (_syncIntervalOption == 'schedule') {
         final hasSelectedDays = _selectedDays.any((day) => day);
         if (!hasSelectedDays) {
-          setState(() => _lastError = 'Bitte wähle mindestens einen Wochentag aus');
+          setState(
+            () => _lastError = 'Bitte wähle mindestens einen Wochentag aus',
+          );
           return;
         }
       }
@@ -208,20 +242,22 @@ class _ConfigScreenState extends State<ConfigScreen> {
         syncIntervalMinutes: int.tryParse(_syncIntervalController.text) ?? 15,
         autoSync: _autoSync,
         syncDaysOfWeek: syncDaysOfWeek,
-        syncTime: _syncIntervalOption == 'schedule' 
+        syncTime: _syncIntervalOption == 'schedule'
             ? '${_selectedTime.hour.toString().padLeft(2, '0')}:${_selectedTime.minute.toString().padLeft(2, '0')}'
             : '',
       );
 
       await context.read<SyncProvider>().saveConfig(config);
-      
+
       setState(() => _lastError = null);
 
       if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(_isNewConfig ? 'Profil erstellt!' : 'Profil aktualisiert!'),
+          content: Text(
+            _isNewConfig ? 'Profil erstellt!' : 'Profil aktualisiert!',
+          ),
           backgroundColor: AppColors.success,
         ),
       );
@@ -237,7 +273,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
   void _handleException(dynamic exception, String title) {
     final errorMessage = '$title: ${exception.toString()}';
-    
+
     setState(() => _lastError = errorMessage);
 
     if (mounted) {
@@ -263,7 +299,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
         );
         return;
       }
-      
+
       if (_usernameController.text.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -274,7 +310,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
         );
         return;
       }
-      
+
       if (_passwordController.text.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -288,8 +324,8 @@ class _ConfigScreenState extends State<ConfigScreen> {
 
       final config = SyncConfig(
         id: widget.configId,
-        name: _configNameController.text.isEmpty 
-            ? 'Temp Config' 
+        name: _configNameController.text.isEmpty
+            ? 'Temp Config'
             : _configNameController.text,
         webdavUrl: _webdavUrlController.text,
         username: _usernameController.text,
@@ -339,7 +375,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
         setState(() {
           _localFolderController.text = selectedDirectory;
         });
-        
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Ordner gewählt: $selectedDirectory'),
@@ -393,10 +429,7 @@ class _ConfigScreenState extends State<ConfigScreen> {
                     Expanded(
                       child: SelectableText(
                         _lastError!,
-                        style: TextStyle(
-                          color: Colors.red[900],
-                          fontSize: 12,
-                        ),
+                        style: TextStyle(color: Colors.red[900], fontSize: 12),
                       ),
                     ),
                     IconButton(
@@ -483,7 +516,9 @@ class _ConfigScreenState extends State<ConfigScreen> {
                         ),
                         suffixIcon: IconButton(
                           icon: Icon(
-                            _showPassword ? Icons.visibility : Icons.visibility_off,
+                            _showPassword
+                                ? Icons.visibility
+                                : Icons.visibility_off,
                           ),
                           onPressed: () {
                             setState(() => _showPassword = !_showPassword);
@@ -553,11 +588,26 @@ class _ConfigScreenState extends State<ConfigScreen> {
                         ),
                       ),
                       items: const [
-                        DropdownMenuItem(value: 'hourly', child: Text('Stündlich (60 Min)')),
-                        DropdownMenuItem(value: 'daily', child: Text('Täglich (1440 Min)')),
-                        DropdownMenuItem(value: 'weekly', child: Text('Wöchentlich (10080 Min)')),
-                        DropdownMenuItem(value: 'schedule', child: Text('Nach Plan (Wochentage + Uhrzeit)')),
-                        DropdownMenuItem(value: 'custom', child: Text('Benutzer definiert')),
+                        DropdownMenuItem(
+                          value: 'hourly',
+                          child: Text('Stündlich (60 Min)'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'daily',
+                          child: Text('Täglich (1440 Min)'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'weekly',
+                          child: Text('Wöchentlich (10080 Min)'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'schedule',
+                          child: Text('Nach Plan (Wochentage + Uhrzeit)'),
+                        ),
+                        DropdownMenuItem(
+                          value: 'custom',
+                          child: Text('Benutzer definiert'),
+                        ),
                       ],
                       onChanged: (value) {
                         setState(() {
@@ -597,30 +647,37 @@ class _ConfigScreenState extends State<ConfigScreen> {
                       const SizedBox(height: 12),
                       Wrap(
                         spacing: 8,
-                        children: [
-                          'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'
-                        ].asMap().entries.map((entry) {
-                          final index = entry.key;
-                          final dayName = entry.value;
-                          return FilterChip(
-                            label: Text(dayName),
-                            selected: _selectedDays[index],
-                            onSelected: (selected) {
-                              setState(() => _selectedDays[index] = selected);
-                            },
-                            side: _selectedDays[index]
-                                ? BorderSide.none
-                                : BorderSide(
-                                    color: Colors.grey[300]!,
-                                    width: 0.5,
-                                  ),
-                            backgroundColor: Colors.transparent,
-                            selectedColor: AppColors.primaryButtonBackground,
-                            labelStyle: TextStyle(
-                              color: _selectedDays[index] ? Colors.white : Colors.black87,
-                            ),
-                          );
-                        }).toList(),
+                        children: ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
+                            .asMap()
+                            .entries
+                            .map((entry) {
+                              final index = entry.key;
+                              final dayName = entry.value;
+                              return FilterChip(
+                                label: Text(dayName),
+                                selected: _selectedDays[index],
+                                onSelected: (selected) {
+                                  setState(
+                                    () => _selectedDays[index] = selected,
+                                  );
+                                },
+                                side: _selectedDays[index]
+                                    ? BorderSide.none
+                                    : BorderSide(
+                                        color: Colors.grey[300]!,
+                                        width: 0.5,
+                                      ),
+                                backgroundColor: Colors.transparent,
+                                selectedColor:
+                                    AppColors.primaryButtonBackground,
+                                labelStyle: TextStyle(
+                                  color: _selectedDays[index]
+                                      ? Colors.white
+                                      : Colors.black87,
+                                ),
+                              );
+                            })
+                            .toList(),
                       ),
                       const SizedBox(height: 16),
                       Row(
@@ -650,12 +707,13 @@ class _ConfigScreenState extends State<ConfigScreen> {
                           ),
                           ElevatedButton.icon(
                             onPressed: () async {
-                              final TimeOfDay? picked = await showDialog<TimeOfDay>(
-                                context: context,
-                                builder: (context) => CustomTimePicker(
-                                  initialTime: _selectedTime,
-                                ),
-                              );
+                              final TimeOfDay? picked =
+                                  await showDialog<TimeOfDay>(
+                                    context: context,
+                                    builder: (context) => CustomTimePicker(
+                                      initialTime: _selectedTime,
+                                    ),
+                                  );
                               if (picked != null && picked != _selectedTime) {
                                 setState(() => _selectedTime = picked);
                               }
@@ -735,7 +793,8 @@ class _FolderNavigatorDialogState extends State<_FolderNavigatorDialog> {
     });
 
     try {
-      currentFolders = await widget.syncProvider.syncService.getRemoteFoldersAtPath(currentPath);
+      currentFolders = await widget.syncProvider.syncService
+          .getRemoteFoldersAtPath(currentPath);
     } catch (e) {
       setState(() {
         errorMessage = e.toString();
@@ -768,11 +827,11 @@ class _FolderNavigatorDialogState extends State<_FolderNavigatorDialog> {
   String _getBreadcrumb() {
     final uri = Uri.parse(currentPath);
     final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
-    
+
     if (segments.isEmpty) {
       return '/';
     }
-    
+
     return '/${segments.join(' > ')}';
   }
 
@@ -804,57 +863,55 @@ class _FolderNavigatorDialogState extends State<_FolderNavigatorDialog> {
         child: isLoading
             ? const Center(child: CircularProgressIndicator())
             : errorMessage != null
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.error_outline, color: Colors.red[700], size: 48),
-                        const SizedBox(height: 16),
-                        Text(
-                          errorMessage!,
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.red[700]),
-                        ),
-                      ],
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.error_outline, color: Colors.red[700], size: 48),
+                    const SizedBox(height: 16),
+                    Text(
+                      errorMessage!,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.red[700]),
                     ),
-                  )
-                : currentFolders.isEmpty
-                    ? const Center(
-                        child: Text('Keine Unterordner vorhanden'),
-                      )
-                    : ListView.builder(
-                        shrinkWrap: true,
-                        itemCount: currentFolders.length,
-                        itemBuilder: (context, index) {
-                          final folder = currentFolders[index];
-                          final folderName = folder['name'] as String;
-                          final folderPath = folder['href'] as String;
+                  ],
+                ),
+              )
+            : currentFolders.isEmpty
+            ? const Center(child: Text('Keine Unterordner vorhanden'))
+            : ListView.builder(
+                shrinkWrap: true,
+                itemCount: currentFolders.length,
+                itemBuilder: (context, index) {
+                  final folder = currentFolders[index];
+                  final folderName = folder['name'] as String;
+                  final folderPath = folder['href'] as String;
 
-                          return ListTile(
-                            leading: const Icon(Icons.folder),
-                            title: Text(folderName),
-                            subtitle: Text(
-                              folderPath,
-                              style: const TextStyle(fontSize: 10),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            onTap: () {
-                              widget.onFolderSelected(folderPath);
-                            },
-                            onLongPress: () {
-                              _navigateToFolder(folderPath);
-                            },
-                            trailing: IconButton(
-                              icon: const Icon(Icons.arrow_forward),
-                              onPressed: () {
-                                _navigateToFolder(folderPath);
-                              },
-                              tooltip: 'In Ordner navigieren',
-                            ),
-                          );
-                        },
-                      ),
+                  return ListTile(
+                    leading: const Icon(Icons.folder),
+                    title: Text(folderName),
+                    subtitle: Text(
+                      folderPath,
+                      style: const TextStyle(fontSize: 10),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    onTap: () {
+                      widget.onFolderSelected(folderPath);
+                    },
+                    onLongPress: () {
+                      _navigateToFolder(folderPath);
+                    },
+                    trailing: IconButton(
+                      icon: const Icon(Icons.arrow_forward),
+                      onPressed: () {
+                        _navigateToFolder(folderPath);
+                      },
+                      tooltip: 'In Ordner navigieren',
+                    ),
+                  );
+                },
+              ),
       ),
       actions: [
         if (navigationStack.length > 1)
