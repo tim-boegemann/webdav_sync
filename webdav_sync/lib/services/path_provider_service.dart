@@ -85,5 +85,50 @@ class PathProviderService {
       rethrow;
     }
   }
+
+  /// 🔑 Konvertiert einen absoluten Pfad zu einem relativen Pfad
+  /// z.B. "/private/var/.../Documents/WebDAVSync/MyFolder" → "WebDAVSync/MyFolder"
+  /// Returns null, wenn der Pfad nicht innerhalb der App-Documents liegt
+  static Future<String?> toRelativePath(String absolutePath) async {
+    try {
+      final basePath = await getBasePath();
+      if (absolutePath.startsWith(basePath)) {
+        // Entferne den Basis-Pfad
+        final relative = absolutePath.replaceFirst(basePath, '');
+        // Entferne führende Pfad-Trenner
+        return relative.replaceFirst(RegExp(r'^[/\\]+'), '');
+      }
+      return null;
+    } catch (e) {
+      logger.e('Fehler beim Konvertieren zu relativem Pfad: $e', error: e);
+      return null;
+    }
+  }
+
+  /// 🔑 Konvertiert einen relativen Pfad zu einem absoluten Pfad
+  /// z.B. "WebDAVSync/MyFolder" → "/private/var/.../Documents/WebDAVSync/MyFolder"
+  static Future<String> toAbsolutePath(String relativePath) async {
+    try {
+      final basePath = await getBasePath();
+      return path.join(basePath, relativePath);
+    } catch (e) {
+      logger.e('Fehler beim Konvertieren zu absolutem Pfad: $e', error: e);
+      rethrow;
+    }
+  }
+
+  /// iOS-spezifisch: Gibt nur Ordner **innerhalb** des App-Dokumentverzeichnisses zurück
+  /// Hilfreich um zu validieren, dass der Benutzer nur im erlaubten Bereich speichert
+  static Future<bool> isPathWithinAppDocuments(String absolutePath) async {
+    try {
+      final basePath = await getBasePath();
+      final normalizedPath = absolutePath.replaceAll('\\', '/');
+      final normalizedBase = basePath.replaceAll('\\', '/');
+      return normalizedPath.startsWith(normalizedBase);
+    } catch (e) {
+      logger.e('Fehler beim Validieren des Pfads: $e', error: e);
+      return false;
+    }
+  }
 }
 

@@ -9,6 +9,7 @@ import '../models/sync_config.dart';
 import '../models/sync_status.dart';
 import '../utils/logger.dart';
 import '../models/file_hash_database.dart';
+import 'path_provider_service.dart';
 
 class WebdavSyncService {
   late http.Client _httpClient;
@@ -21,6 +22,29 @@ class WebdavSyncService {
 
   bool get isConfigured => _config != null;
   SyncConfig? get config => _config;
+
+  /// 🔑 Gibt den absoluten Pfad zur lokalen Synchronisierung zurück
+  /// Konvertiert den relativen Pfad (aus SyncConfig) zu einem absoluten Pfad
+  /// Dies verhindert Probleme bei Änderung der iOS App-GUID
+  Future<String> getLocalFolderAbsolutePath() async {
+    if (_config == null) {
+      throw Exception('Konfiguration nicht initialisiert');
+    }
+
+    try {
+      // Wenn der Pfad bereits absolut ist (Fallback für alte Daten), verwende ihn direkt
+      if (_config!.localFolder.startsWith('/') || _config!.localFolder.startsWith('C:')) {
+        return _config!.localFolder;
+      }
+
+      // Neuer Standard: Relativer Pfad - konvertiere zu absolut
+      return await PathProviderService.toAbsolutePath(_config!.localFolder);
+    } catch (e) {
+      logger.e('Fehler beim Bestimmen des absoluten lokalen Pfads: $e', error: e);
+      // Fallback: Verwende Standardpfad
+      return await PathProviderService.getDefaultLocalPath();
+    }
+  }
 
   void initialize(SyncConfig config) {
     _config = config;
@@ -177,8 +201,12 @@ class WebdavSyncService {
       int filesDownloaded = 0;
       int filesSkipped = 0;
 
+      // 🔑 Konvertiere relativen Pfad zu absolut (iOS UUID-Sicherheit)
+      final localFolderAbsolute = await getLocalFolderAbsolutePath();
+      logger.i('📂 Lokaler Ordner (absolut): $localFolderAbsolute');
+
       // Create local folder if it doesn't exist
-      final localDir = Directory(_config!.localFolder);
+      final localDir = Directory(localFolderAbsolute);
       if (!localDir.existsSync()) {
         localDir.createSync(recursive: true);
       }
@@ -213,7 +241,7 @@ class WebdavSyncService {
         final etagOrModTime = fileMap['etag']!;
         
         final relativePath = _getRelativePath(file, _config!.remoteFolder);
-        final localPath = path.join(_config!.localFolder, remoteFolderName, relativePath);
+        final localPath = path.join(localFolderAbsolute, remoteFolderName, relativePath);
 
         // Überprüfe ob die Datei bereits heruntergeladen wurde und unverändert ist
         final oldEtag = _hashDatabase.getHash(relativePath);

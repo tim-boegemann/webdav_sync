@@ -9,7 +9,9 @@ class SyncConfig {
   @Deprecated('Nutze CredentialsService stattdessen')
   final String password;
   final String remoteFolder;
-  final String localFolder;
+  final String localFolder; // 🔑 WICHTIG: RELATIVER Pfad (z.B. "WebDAVSync/MyFolder"), NICHT absolut!
+  // Wird zur Laufzeit mit getApplicationDocumentsDirectory() kombiniert
+  // Dies verhindert Probleme wenn die iOS App-UUID sich ändert
   final int syncIntervalMinutes;
   final bool autoSync;
   final List<int> syncDaysOfWeek; // 1=Monday, 7=Sunday

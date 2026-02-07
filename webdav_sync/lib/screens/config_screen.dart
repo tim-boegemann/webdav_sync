@@ -372,17 +372,52 @@ class _ConfigScreenState extends State<ConfigScreen> {
       final selectedDirectory = await FilePicker.platform.getDirectoryPath();
 
       if (selectedDirectory != null && mounted) {
-        setState(() {
-          _localFolderController.text = selectedDirectory;
-        });
+        // 🔑 Validiere dass der gewählte Ordner innerhalb der App-Documents liegt (iOS-Sicherheit)
+        final isValid = await PathProviderService.isPathWithinAppDocuments(selectedDirectory);
+        
+        if (!isValid) {
+          // Außerhalb der App-Documents - teile mit Benutzer mit
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Fehler: Der Ordner muss sich within der App-Dateien befinden. '
+                  'Bitte wähle einen Ordner innerhalb des Dokumentverzeichnisses.',
+                ),
+                backgroundColor: AppColors.error,
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
+          return;
+        }
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Ordner gewählt: $selectedDirectory'),
-            backgroundColor: AppColors.success,
-            duration: const Duration(seconds: 2),
-          ),
-        );
+        // 🔑 Konvertiere den absoluten Pfad zu einem RELATIVEN Pfad
+        final relativePath = await PathProviderService.toRelativePath(selectedDirectory);
+
+        if (relativePath != null && mounted) {
+          setState(() {
+            _localFolderController.text = relativePath;
+          });
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Ordner gewählt: $relativePath'),
+              backgroundColor: AppColors.success,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Fehler: Der Pfad konnte nicht verarbeitet werden'),
+                backgroundColor: AppColors.error,
+                duration: Duration(seconds: 2),
+              ),
+            );
+          }
+        }
       }
     } catch (e) {
       _handleException(e, 'Fehler beim Auswählen des lokalen Ordners');
