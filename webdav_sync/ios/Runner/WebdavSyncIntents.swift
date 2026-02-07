@@ -6,13 +6,10 @@ import UIKit
 struct SyncAllConfigsIntent: AppIntent {
     static var title: LocalizedStringResource = "Alle synchronisieren"
     static var description = IntentDescription("Synchronisiert alle WebDAV-Konfigurationen nacheinander.")
-    
-    @Dependency
-    var webdavSyncManager: WebdavSyncManager
 
     func perform() async throws -> some IntentResult {
         do {
-            let result = await webdavSyncManager.syncAllConfigs()
+            let result = await WebdavSyncManager.shared.syncAllConfigs()
             return .result(value: result)
         } catch {
             throw error
@@ -25,15 +22,18 @@ struct SyncConfigIntent: AppIntent {
     static var title: LocalizedStringResource = "Konfiguration synchronisieren"
     static var description = IntentDescription("Synchronisiert eine bestimmte WebDAV-Konfiguration.")
 
-    @Parameter(title: "Konfiguration")
+    @Parameter(title: "Konfiguration", description: "Wähle eine Konfiguration zum Synchronisieren")
     var configName: String
     
-    @Dependency
-    var webdavSyncManager: WebdavSyncManager
+    static var parameterOverrides: [AppIntent.ParameterOverride] {
+        [
+            .init(\.$configName, title: "Konfiguration", description: "WebDAV Konfiguration")
+        ]
+    }
 
     func perform() async throws -> some IntentResult {
         do {
-            let result = await webdavSyncManager.syncConfig(named: configName)
+            let result = await WebdavSyncManager.shared.syncConfig(named: configName)
             return .result(value: result)
         } catch {
             throw error
@@ -45,15 +45,13 @@ struct SyncConfigIntent: AppIntent {
 struct GetSyncStatusIntent: AppIntent {
     static var title: LocalizedStringResource = "Sync-Status anzeigen"
     static var description = IntentDescription("Zeigt den aktuellen Synchronisationsstatus an.")
-    
-    @Dependency
-    var webdavSyncManager: WebdavSyncManager
 
     func perform() async throws -> some IntentResult {
-        let status = await webdavSyncManager.getCurrentStatus()
+        let status = await WebdavSyncManager.shared.getCurrentStatus()
         return .result(value: status)
     }
 }
+
 
 // MARK: - App Shortcuts Provider
 struct WebdavSyncShortcuts: AppShortcutsProvider {
@@ -61,19 +59,22 @@ struct WebdavSyncShortcuts: AppShortcutsProvider {
         [
             AppShortcut(
                 intent: SyncAllConfigsIntent(),
-                phrases: ["Alle synchronisieren", "WebDAV synchronisieren"]
-            ),
-            AppShortcut(
-                intent: SyncConfigIntent(),
-                phrases: ["\\(.configName) synchronisieren"]
+                phrases: [
+                    "Alle synchronisieren",
+                    "WebDAV synchronisieren"
+                ]
             ),
             AppShortcut(
                 intent: GetSyncStatusIntent(),
-                phrases: ["WebDAV Status", "Sync-Status"]
+                phrases: [
+                    "Sync Status",
+                    "Status anzeigen"
+                ]
             )
         ]
     }
 }
+
 
 // MARK: - WebDAV Sync Manager (iOS Bridge)
 actor WebdavSyncManager {

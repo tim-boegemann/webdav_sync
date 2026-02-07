@@ -34,8 +34,20 @@ class SyncProvider extends ChangeNotifier {
 
   SyncProvider() {
     _loadConfigs();
-    _initializeShortcuts();
     _startAutoSyncTimer();
+    // Initialisiere Shortcuts asynchron um Crashes zu vermeiden
+    _initializeShortcutsAsync();
+  }
+  
+  /// Initialisiere Shortcuts asynchron (sicherer für App-Start)
+  Future<void> _initializeShortcutsAsync() async {
+    try {
+      await Future.delayed(const Duration(milliseconds: 500));
+      _initializeShortcuts();
+    } catch (e) {
+      logger.e('Fehler bei Shortcuts-Initialisierung', error: e);
+      // Nicht kritisch - App läuft ohne Shortcuts weiter
+    }
   }
 
   @override
@@ -47,8 +59,8 @@ class SyncProvider extends ChangeNotifier {
   /// Initialisiere Shortcuts-Handler
   void _initializeShortcuts() {
     ShortcutsHandler.initialize();
-    ShortcutsHandler.onShortcutCommand = (command, params) {
-      _handleShortcutCommand(command, params);
+    ShortcutsHandler.onShortcutCommand = (command, params) async {
+      await _handleShortcutCommand(command, params);
     };
     
     // Registriere Background Fetch Handler
@@ -57,23 +69,28 @@ class SyncProvider extends ChangeNotifier {
 
   /// Handle Shortcuts-Befehle von iOS App Intents
   Future<void> _handleShortcutCommand(String command, Map<String, String> params) async {
-    logger.i('Handle Shortcut Command - $command');
+    logger.i('🎯 SHORTCUT COMMAND EMPFANGEN: $command mit Params: $params');
     
     final cmd = parseShortcutCommand(command);
     
     switch (cmd) {
       case ShortcutCommand.syncAll:
+        logger.i('🔄 Starte Shortcut: Synchronisiere alle Konfigurationen');
         await _syncAllConfigs();
+        logger.i('✅ Shortcut: Alle Konfigurationen synchronisiert');
         break;
         
       case ShortcutCommand.syncConfig:
         final configName = params['configName'];
+        logger.i('🔄 Starte Shortcut: Synchronisiere Konfiguration: $configName');
         if (configName != null) {
           await _syncConfigByName(configName);
         }
+        logger.i('✅ Shortcut: Konfiguration $configName synchronisiert');
         break;
         
       case ShortcutCommand.getStatus:
+        logger.i('📊 Shortcut: Zeige Status');
         _printSyncStatus();
         break;
     }
@@ -86,10 +103,23 @@ class SyncProvider extends ChangeNotifier {
     for (final config in _allConfigs) {
       await setCurrentConfig(config);
       await performSync();
-      logger.i('Sync für "${config.name}" abgeschlossen');
+      
+      // Zeige Statistiken
+      if (_syncStatus != null) {
+        logger.i('✅ Sync für "${config.name}" abgeschlossen:');
+        logger.i('   📥 Geladen: ${_syncStatus!.filesSync} Dateien');
+        logger.i('   ⏭️  Übersprungen: ${_syncStatus!.filesSkipped} Dateien');
+        logger.i('   🕐 Letzter Sync: ${_syncStatus!.lastSyncTime}');
+        logger.i('   📊 Status: ${_syncStatus!.status}');
+        if (_syncStatus!.error != null) {
+          logger.e('   ❌ Fehler: ${_syncStatus!.error}');
+        }
+      } else {
+        logger.w('⚠️  Sync für "${config.name}" - Kein Status verfügbar');
+      }
     }
     
-    logger.i('Alle Synchronisierungen abgeschlossen');
+    logger.i('✅✅✅ Alle Synchronisierungen abgeschlossen ✅✅✅');
   }
 
   /// Synchronisiere eine spezifische Konfiguration nach Name
@@ -101,7 +131,19 @@ class SyncProvider extends ChangeNotifier {
       await setCurrentConfig(config);
       await performSync();
       
-      logger.i('Sync für "$configName" abgeschlossen');
+      // Zeige Statistiken
+      if (_syncStatus != null) {
+        logger.i('✅ Sync für "$configName" abgeschlossen:');
+        logger.i('   📥 Geladen: ${_syncStatus!.filesSync} Dateien');
+        logger.i('   ⏭️  Übersprungen: ${_syncStatus!.filesSkipped} Dateien');
+        logger.i('   🕐 Letzter Sync: ${_syncStatus!.lastSyncTime}');
+        logger.i('   📊 Status: ${_syncStatus!.status}');
+        if (_syncStatus!.error != null) {
+          logger.e('   ❌ Fehler: ${_syncStatus!.error}');
+        }
+      } else {
+        logger.w('⚠️  Sync für "$configName" - Kein Status verfügbar');
+      }
     } catch (e) {
       logger.e('Fehler bei Sync für $configName', error: e);
     }
@@ -178,9 +220,18 @@ class SyncProvider extends ChangeNotifier {
   }
 
   Future<void> setCurrentConfig(SyncConfig config) async {
-    _config = config;
+    // 🔐 WICHTIG: Lade Config mit Passwort aus SecureStorage neu!
+    final configWithPassword = await _configService.loadConfig(config.id);
+    if (configWithPassword != null) {
+      _config = configWithPassword;  // Mit aktualisiertem Passwort
+      logger.d('✅ Config mit Passwort geladen: ${_config!.name}');
+    } else {
+      _config = config;  // Fallback - aber ohne Passwort
+      logger.w('⚠️ Config konnte nicht mit Passwort geladen werden!');
+    }
+    
     await _configService.setSelectedConfigId(config.id);
-    _syncService.initialize(config);
+    _syncService.initialize(_config!);
     await _syncService.initializeHashDatabase();
     _validationError = _syncService.validateConfig();
     

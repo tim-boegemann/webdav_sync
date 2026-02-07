@@ -4,6 +4,7 @@ import 'package:file_picker/file_picker.dart';
 import '../models/sync_config.dart';
 import '../providers/sync_provider.dart';
 import '../services/path_provider_service.dart';
+import '../services/credentials_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/custom_time_picker.dart';
 
@@ -47,13 +48,20 @@ class _ConfigScreenState extends State<ConfigScreen> {
     _configNameController = TextEditingController(text: config?.name ?? '');
     _webdavUrlController = TextEditingController(text: config?.webdavUrl ?? '');
     _usernameController = TextEditingController(text: config?.username ?? '');
-    _passwordController = TextEditingController(text: config?.password ?? '');
+    _passwordController = TextEditingController(); // Wird asynchron gefüllt
     _remoteFolderController =
         TextEditingController(text: config?.remoteFolder ?? '');
     _localFolderController = TextEditingController(text: config?.localFolder ?? '');
     _syncIntervalController =
         TextEditingController(text: (config?.syncIntervalMinutes ?? 15).toString());
     _autoSync = config?.autoSync ?? false;
+    
+    // Lade Passwort asynchron nach dem Build
+    if (!_isNewConfig && config != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _loadPasswordForConfig(config.id);
+      });
+    }
     
     // Für neue Konfigurationen: Setze Standardwerte
     if (_isNewConfig) {
@@ -105,6 +113,15 @@ class _ConfigScreenState extends State<ConfigScreen> {
     // Initialisiere Default-Pfad wenn leer
     if (_localFolderController.text.isEmpty) {
       _initializeDefaultLocalPath();
+    }
+  }
+
+  /// 🔐 Lade das gespeicherte Passwort aus SecureStorage
+  Future<void> _loadPasswordForConfig(String configId) async {
+    final credentialsService = CredentialsService();
+    final credentials = await credentialsService.getCredentials(configId);
+    if (mounted && credentials.password != null) {
+      _passwordController.text = credentials.password!;
     }
   }
 

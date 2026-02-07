@@ -62,26 +62,36 @@ class ConfigService {
     try {
       var config = configs.firstWhere((c) => c.id == id);
       
+      logger.d('🔐 Lade Config mit ID: $id, Name: ${config.name}');
+      
       // Lade Passwort aus sicherer Speicherung
       final credentials = await _credentialsService.getCredentials(id);
+      
+      // WICHTIG: Passwort IMMER neu laden, auch wenn null
+      config = SyncConfig(
+        id: config.id,
+        name: config.name,
+        webdavUrl: config.webdavUrl,
+        username: credentials.username ?? config.username,
+        password: credentials.password ?? '', // Nutze geladen Passwort oder ""
+        remoteFolder: config.remoteFolder,
+        localFolder: config.localFolder,
+        syncIntervalMinutes: config.syncIntervalMinutes,
+        autoSync: config.autoSync,
+        syncDaysOfWeek: config.syncDaysOfWeek,
+        syncTime: config.syncTime,
+      );
+      
+      // Debug: Zeige ob Passwort geladen wurde
       if (credentials.password != null) {
-        config = SyncConfig(
-          id: config.id,
-          name: config.name,
-          webdavUrl: config.webdavUrl,
-          username: credentials.username ?? config.username,
-          password: credentials.password ?? '',
-          remoteFolder: config.remoteFolder,
-          localFolder: config.localFolder,
-          syncIntervalMinutes: config.syncIntervalMinutes,
-          autoSync: config.autoSync,
-          syncDaysOfWeek: config.syncDaysOfWeek,
-          syncTime: config.syncTime,
-        );
+        logger.d('✅ Passwort geladen (${credentials.password!.length} Zeichen)');
+      } else {
+        logger.w('⚠️ KEINE Anmeldedaten in SecureStorage für Config $id - Passwort ist LEER!');
       }
       
       return config;
     } catch (e) {
+      logger.e('❌ Fehler beim Laden von Config $id: $e');
       return null;
     }
   }
