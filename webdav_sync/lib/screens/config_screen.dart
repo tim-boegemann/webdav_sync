@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
+import 'dart:io' show Platform;
 import '../models/sync_config.dart';
 import '../providers/sync_provider.dart';
 import '../services/path_provider_service.dart';
@@ -372,51 +373,50 @@ class _ConfigScreenState extends State<ConfigScreen> {
       final selectedDirectory = await FilePicker.platform.getDirectoryPath();
 
       if (selectedDirectory != null && mounted) {
-        // 🔑 Validiere dass der gewählte Ordner innerhalb der App-Documents liegt (iOS-Sicherheit)
-        final isValid = await PathProviderService.isPathWithinAppDocuments(selectedDirectory);
-        
-        if (!isValid) {
-          // Außerhalb der App-Documents - teile mit Benutzer mit
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'Fehler: Der Ordner muss sich within der App-Dateien befinden. '
-                  'Bitte wähle einen Ordner innerhalb des Dokumentverzeichnisses.',
+        // 🔑 iOS-SPEZIFISCH: Validiere dass der gewählte Ordner innerhalb der App-Documents liegt
+        // (iOS App Sandbox Sicherheit)
+        if (Platform.isIOS) {
+          final isValid = await PathProviderService.isPathWithinAppDocuments(selectedDirectory);
+          
+          if (!isValid) {
+            // Außerhalb der App-Documents - teile mit Benutzer mit
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Fehler: Der Ordner muss sich within der App-Dateien befinden. '
+                    'Bitte wähle einen Ordner innerhalb des Dokumentverzeichnisses.',
+                  ),
+                  backgroundColor: AppColors.error,
+                  duration: Duration(seconds: 3),
                 ),
-                backgroundColor: AppColors.error,
-                duration: Duration(seconds: 3),
-              ),
-            );
+              );
+            }
+            return;
           }
-          return;
         }
 
-        // 🔑 Konvertiere den absoluten Pfad zu einem RELATIVEN Pfad
+        // 🔑 Konvertiere den absoluten Pfad zu einem RELATIVEN Pfad (iOS) oder behalte absolut (Android/Windows)
         final relativePath = await PathProviderService.toRelativePath(selectedDirectory);
 
-        if (relativePath != null && mounted) {
+        if (mounted) {
+          // iOS: Nutze relativen Pfad (wegen UUID-Änderung)
+          // Android/Windows: Nutze absoluten Pfad (stabiler)
+          final pathToStore = Platform.isIOS
+              ? (relativePath ?? selectedDirectory)
+              : selectedDirectory;
+
           setState(() {
-            _localFolderController.text = relativePath;
+            _localFolderController.text = pathToStore;
           });
 
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('Ordner gewählt: $relativePath'),
+              content: Text('Ordner gewählt: $pathToStore'),
               backgroundColor: AppColors.success,
               duration: const Duration(seconds: 2),
             ),
           );
-        } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Fehler: Der Pfad konnte nicht verarbeitet werden'),
-                backgroundColor: AppColors.error,
-                duration: Duration(seconds: 2),
-              ),
-            );
-          }
         }
       }
     } catch (e) {
