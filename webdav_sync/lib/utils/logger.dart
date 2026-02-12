@@ -1,5 +1,4 @@
 import 'package:logger/logger.dart';
-import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 
 final logger = Logger(

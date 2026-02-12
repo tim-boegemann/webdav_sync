@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'dart:io';
 import '../models/sync_config.dart';
 import '../models/sync_status.dart';
 import '../providers/sync_provider.dart';
 import '../theme/app_colors.dart';
 import 'config_screen.dart';
 import 'sync_screen.dart';
+import 'pdf_viewer_screen.dart';
 
 class ConfigListScreen extends StatefulWidget {
   const ConfigListScreen({super.key});
@@ -99,9 +101,7 @@ class _ConfigListScreenState extends State<ConfigListScreen>
 
               return InkWell(
                 onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => SyncScreen(configId: config.id)),
-                  );
+                  _openLocalDataBrowser(context, config);
                 },
                 child: Card(
                   elevation: isSelected ? 4 : 1,
@@ -406,6 +406,40 @@ class _ConfigListScreenState extends State<ConfigListScreen>
     } catch (e) {
       return '-';
     }
+  }
+
+  /// Öffne PDFViewer mit integrierten Dateibrowser
+  void _openLocalDataBrowser(BuildContext context, SyncConfig config) {
+    if (config.localFolder.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Lokaler Ordner nicht konfiguriert'),
+          backgroundColor: AppColors.warning,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
+    final dir = Directory(config.localFolder);
+    if (!dir.existsSync()) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Ordner nicht vorhanden: ${config.localFolder}'),
+          backgroundColor: AppColors.error,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+      return;
+    }
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PDFViewerScreen(
+          config: config,
+        ),
+      ),
+    );
   }
 }
 
