@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:pdfx/pdfx.dart';
 import '../theme/app_colors.dart';
 import '../models/sync_config.dart';
 
@@ -17,8 +18,19 @@ class PDFViewerScreen extends StatefulWidget {
 }
 
 class _PDFViewerScreenState extends State<PDFViewerScreen> {
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   String? _selectedFilePath;
+  dynamic _pdfController; // PdfController für Windows oder PdfControllerPinch für andere
+  bool _isPdfLoading = false;
+  String? _pdfError;
+  bool _isAppBarVisible = true; // Neue Variable für AppBar-Sichtbarkeit
+  bool _isSearchDrawerOpen = false; // Neue Variable für Search Drawer Toggle
+  bool _savedSearchDrawerOpen = false; // Speichert ob Suche offen war
+
+  @override
+  void dispose() {
+    _pdfController?.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -34,22 +46,24 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
       if (lastFilePath != null && File(lastFilePath).existsSync()) {
         // Datei existiert noch, lade sie
-        setState(() {
-          _selectedFilePath = lastFilePath;
-        });
+        await _loadPdfFile(lastFilePath);
       } else {
-        // Datei existiert nicht mehr, öffne Drawer
+        // Datei existiert nicht mehr, öffne Search Drawer
         if (mounted) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            _scaffoldKey.currentState?.openDrawer();
+            setState(() {
+              _isSearchDrawerOpen = true;
+            });
           });
         }
       }
     } catch (e) {
-      // Bei Fehler: öffne Drawer
+      // Bei Fehler: öffne Search Drawer
       if (mounted) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          _scaffoldKey.currentState?.openDrawer();
+          setState(() {
+            _isSearchDrawerOpen = true;
+          });
         });
       }
     }
@@ -65,20 +79,80 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     }
   }
 
+  Future<void> _previousPage() async {
+    if (_pdfController == null || _selectedFilePath == null) return;
+
+    try {
+      if (Platform.isWindows) {
+        final windowsController = _pdfController as PdfController;
+        await windowsController.previousPage(
+          duration: const Duration(milliseconds: 1),
+          curve: Curves.easeInOut,
+        );
+      } else {
+        final mobileController = _pdfController as PdfControllerPinch;
+        await mobileController.previousPage(
+          duration: const Duration(milliseconds: 1),
+          curve: Curves.easeInOut,
+        );
+      }
+    } catch (e) {
+      // Fehler ignorieren
+    }
+  }
+
+  Future<void> _nextPage() async {
+    if (_pdfController == null || _selectedFilePath == null) return;
+
+    try {
+      if (Platform.isWindows) {
+        final windowsController = _pdfController as PdfController;
+        await windowsController.nextPage(
+          duration: const Duration(milliseconds: 1),
+          curve: Curves.easeInOut,
+        );
+      } else {
+        final mobileController = _pdfController as PdfControllerPinch;
+        await mobileController.nextPage(
+          duration: const Duration(milliseconds: 1),
+          curve: Curves.easeInOut,
+        );
+      }
+    } catch (e) {
+      // Fehler ignorieren
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      key: _scaffoldKey,
-      appBar: AppBar(
-        title: Text(widget.config.name),
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
-      drawer: _buildSearchDrawer(),
+      appBar: _isAppBarVisible
+          ? AppBar(
+              title: Text(widget.config.name),
+              elevation: 0,
+              leading: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back),
+                    onPressed: () => Navigator.pop(context),
+                    tooltip: 'Zurück',
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.search),
+                    onPressed: () {
+                      setState(() {
+                        _isSearchDrawerOpen = !_isSearchDrawerOpen;
+                      });
+                    },
+                    tooltip: 'Suche',
+                  ),
+                ],
+              ),
+              leadingWidth: 100,
+            )
+          : null,
       body: Stack(
         children: [
           // Hauptinhalt
@@ -118,23 +192,154 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                     ),
                   ),
                 )
-              : _buildPDFViewer(_selectedFilePath!),
-          // Versteckter Button auf der linken Seite
+              : _buildPDFViewer(_selectedFilePath!),          // Versteckter Button auf der linken Seite - obere 20% für Suche
           Positioned(
             left: 0,
             top: 0,
+            height: MediaQuery.of(context).size.height * 0.20,
+            width: MediaQuery.of(context).size.width * 0.25,
+            child: GestureDetector(
+              onTap: () {
+                setState(() {
+                  // Toggle Search
+                  _isSearchDrawerOpen = !_isSearchDrawerOpen;
+                });
+              },
+              child: Container(
+                color: Colors.transparent,
+              ),
+            ),
+          ),          // Versteckter Button auf der linken Seite für vorherige Seite
+          Positioned(
+            left: 0,
+            top: MediaQuery.of(context).size.height * 0.20,
             bottom: 0,
             width: MediaQuery.of(context).size.width * 0.25,
             child: GestureDetector(
-              onTap: () => _scaffoldKey.currentState?.openDrawer(),
+              onTap: () {
+                // Wenn PDF geladen: vorherige Seite
+                if (_selectedFilePath != null) {
+                  _previousPage();
+                }
+              },
               child: Container(
                 color: Colors.transparent,
               ),
             ),
           ),
+          // Versteckter Button auf der rechten Seite
+          Positioned(
+            right: 0,
+            top: 0,
+            bottom: 0,
+            width: MediaQuery.of(context).size.width * 0.25,
+            child: GestureDetector(
+              onTap: () => _nextPage(),
+              child: Container(
+                color: Colors.transparent,
+              ),
+            ),
+          ),
+          // Versteckter Button in der Mitte zum Ein-/Ausblenden der AppBar
+          if (_selectedFilePath != null)
+            Positioned(
+              left: MediaQuery.of(context).size.width * 0.25,
+              right: MediaQuery.of(context).size.width * 0.25,
+              top: 0,
+              bottom: 0,
+              child: GestureDetector(
+                onTap: () {
+                  setState(() {
+                    bool anyUIVisible = _isAppBarVisible || _isSearchDrawerOpen;
+                    
+                    if (anyUIVisible) {
+                      // SearchBar oder AppBar ist sichtbar: speichere Search-Status und verstecke alles
+                      _savedSearchDrawerOpen = _isSearchDrawerOpen;
+                      _isAppBarVisible = false;
+                      _isSearchDrawerOpen = false;
+                    } else {
+                      // Beides ist versteckt: öffne AppBar und stelle Search-Status wieder her
+                      _isAppBarVisible = true;
+                      _isSearchDrawerOpen = _savedSearchDrawerOpen;
+                    }
+                  });
+                },
+                child: Container(
+                  color: Colors.transparent,
+                ),
+              ),
+            ),
+          // Suchfeld-Overlay auf der linken Seite
+          if (_isSearchDrawerOpen)
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: MediaQuery.of(context).size.shortestSide < 600
+                  ? MediaQuery.of(context).size.width
+                  : MediaQuery.of(context).size.width * 0.40,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 8,
+                      offset: const Offset(2, 0),
+                    ),
+                  ],
+                ),
+                child: _buildSearchDrawer(),
+              ),
+            ),
         ],
       ),
     );
+  }
+
+  Future<void> _loadPdfFile(String filePath) async {
+    try {
+      // Direkt void setState um sofort null zu setzen (triggert rebuild)
+      setState(() {
+        _isPdfLoading = true;
+        _pdfError = null;
+        _selectedFilePath = null;
+        _pdfController = null;
+      });
+
+      // Dispose alter Controller
+      _pdfController?.dispose();
+      await Future.delayed(const Duration(milliseconds: 50));
+
+      // Lade neue PDF mit plattformabhängiger Konfiguration
+      dynamic newController;
+      if (Platform.isWindows) {
+        // Windows: verwende PdfController (ohne Zoom)
+        newController = PdfController(
+          document: PdfDocument.openFile(filePath),
+        );
+      } else {
+        // Android, iOS, macOS, Web: verwende PdfControllerPinch (mit Zoom)
+        newController = PdfControllerPinch(
+          document: PdfDocument.openFile(filePath),
+        );
+      }
+
+      if (mounted) {
+        setState(() {
+          _selectedFilePath = filePath;
+          _pdfController = newController;
+          _isPdfLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isPdfLoading = false;
+          _pdfError = 'Fehler beim Laden der PDF: $e';
+        });
+      }
+    }
   }
 
   Widget _buildSearchDrawer() {
@@ -144,13 +349,13 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           initialPath: widget.config.localFolder,
           configName: widget.config.name,
           onFileSelected: (filePath) {
-            setState(() {
-              _selectedFilePath = filePath;
-            });
+            _loadPdfFile(filePath);
             // Speichere die Datei als zuletzt geöffnet
             _saveLastOpenedFile(filePath);
-            // Schließe den Drawer
-            Navigator.pop(context);
+            // Schließe das Search Drawer Overlay
+            setState(() {
+              _isSearchDrawerOpen = false;
+            });
           },
         ),
       ),
@@ -158,40 +363,113 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }
 
   Widget _buildPDFViewer(String filePath) {
-    return Container(
-      color: Colors.white,
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.picture_as_pdf,
-              size: 64,
-              color: Colors.grey[400],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'PDF-Viewer wird eingebaut...',
-              style: TextStyle(
-                color: Colors.grey[600],
-                fontSize: 16,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              filePath.split(Platform.pathSeparator).last,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.grey[500],
-                fontSize: 12,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
+    if (_isPdfLoading) {
+      return Container(
+        color: Colors.white,
+        child: const Center(
+          child: CircularProgressIndicator(),
         ),
-      ),
-    );
+      );
+    }
+
+    if (_pdfError != null) {
+      return Container(
+        color: Colors.white,
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.error_outline,
+                size: 64,
+                color: Colors.red[400],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                _pdfError!,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.red[600],
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    if (_pdfController == null) {
+      return Container(
+        color: Colors.white,
+      );
+    }
+
+    if (Platform.isWindows) {
+      // Windows: verwende PdfView ohne Zoom
+      return Container(
+        color: Colors.white,
+        child: PdfView(
+          controller: _pdfController as PdfController,
+          onDocumentLoaded: (_) {},
+        ),
+      );
+    } else {
+      // Android, iOS, macOS, Web: verwende PdfViewPinch mit Zoom
+      return Container(
+        color: Colors.white,
+        child: PdfViewPinch(
+          controller: _pdfController as PdfControllerPinch,
+          onDocumentLoaded: (document) async {
+            // Automatisch auf Höhe skalieren beim Laden
+            await _fitPageToHeight(document);
+          },
+          // Zoom-Einstellungen für alle Plattformen
+          minScale: 1.0,
+          maxScale: 20.0,
+          padding: 0,
+          // Custom Rendering mit 4x Auflösung für Mobile-Qualität
+          builders: PdfViewPinchBuilders<DefaultBuilderOptions>(
+            options: const DefaultBuilderOptions(
+              loaderSwitchDuration: Duration(milliseconds: 100),
+            ),
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _fitPageToHeight(PdfDocument document) async {
+    try {
+      if (!mounted) return;
+
+      // Hole die erste Seite
+      final page = await document.getPage(1);
+      final size = MediaQuery.of(context).size;
+
+      // Berechne verfügbare Höhe (minus AppBar)
+      final appBarHeight = kToolbarHeight;
+      final availableHeight = size.height - appBarHeight;
+
+      // Berechne Scale-Faktor für Fit-to-Height
+      final scaleFactor = availableHeight / page.height;
+
+      // Begrenze Scale im erlaubten Bereich (minScale/maxScale)
+      final clampedScale = scaleFactor.clamp(1.0, 20.0);
+
+      // Erstelle Matrix mit Skalierung
+      final matrix = Matrix4.identity()..scale(clampedScale);
+
+      // Navigiere zur neuen Matrix
+      if (mounted && _pdfController != null) {
+        await (_pdfController as PdfControllerPinch).goTo(
+          destination: matrix,
+          duration: Duration.zero,
+        );
+      }
+    } catch (e) {
+      // Fehler beim Auto-Scaling ignorieren
+    }
   }
 }
 
@@ -227,6 +505,7 @@ class _LocalDataDrawerWidgetState extends State<LocalDataDrawerWidget> {
     _searchController.addListener(() {
       _filterItemsAsync();
     });
+    _loadLastFilterType();
     _loadDirectory();
   }
 
@@ -234,6 +513,29 @@ class _LocalDataDrawerWidgetState extends State<LocalDataDrawerWidget> {
   void dispose() {
     _searchController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadLastFilterType() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedFilterType = prefs.getString('search_filter_type') ?? 'all';
+      if (mounted) {
+        setState(() {
+          _filterType = savedFilterType;
+        });
+      }
+    } catch (e) {
+      // Fehler ignorieren, verwende Default 'all'
+    }
+  }
+
+  Future<void> _saveFilterType(String filterType) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('search_filter_type', filterType);
+    } catch (e) {
+      // Fehler ignorieren
+    }
   }
 
   Future<void> _loadDirectory() async {
@@ -311,9 +613,6 @@ class _LocalDataDrawerWidgetState extends State<LocalDataDrawerWidget> {
   }
 
   void _filterItemsAsync() {
-    if (_searchController.text.isEmpty) {
-      setState(() => _filterType = 'all');
-    }
     _performFilter();
   }
 
@@ -506,6 +805,7 @@ class _LocalDataDrawerWidgetState extends State<LocalDataDrawerWidget> {
         setState(() {
           _filterType = filterValue;
         });
+        _saveFilterType(filterValue);
         _performFilter();
       },
       backgroundColor: Colors.transparent,
