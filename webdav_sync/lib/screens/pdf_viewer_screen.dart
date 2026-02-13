@@ -129,7 +129,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     return Scaffold(
       appBar: _isAppBarVisible
           ? AppBar(
-              title: Text(widget.config.name),
+              title: Text(
+                _selectedFilePath != null
+                    ? _selectedFilePath!.split(Platform.pathSeparator).last
+                    : widget.config.name,
+              ),
               elevation: 0,
               leading: Row(
                 mainAxisSize: MainAxisSize.min,
