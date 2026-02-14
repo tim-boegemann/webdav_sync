@@ -11,16 +11,47 @@ class AnnotationColors {
   static const Color lightBlue = Color(0xFF64B5F6);
   static const Color black = Color(0xFF424242);
   
-  static const List<Color> allColors = [
+  /// Stift-Farben (stroke=1, opacity=100%)
+  static const List<Color> penColors = [
+    black,
     red,
+    darkBlue,
+  ];
+  
+  /// Highlighter-Farben (stroke=20, opacity=10%)
+  static const List<Color> highlighterColors = [
     darkGreen,
     lightGreen,
     orange,
     yellow,
-    darkBlue,
     lightBlue,
-    black,
   ];
+  
+  static const List<Color> allColors = [
+    black,
+    red,
+    darkBlue,
+    darkGreen,
+    lightGreen,
+    orange,
+    yellow,
+    lightBlue,
+  ];
+  
+  /// Prüft ob eine Farbe eine Stift-Farbe ist
+  static bool isPenColor(Color color) {
+    return penColors.contains(color);
+  }
+  
+  /// Gibt die Standard-Strichstärke für eine Farbe zurück
+  static double getDefaultStrokeWidth(Color color) {
+    return isPenColor(color) ? 1.0 : 20.0;
+  }
+  
+  /// Gibt die Standard-Deckkraft für eine Farbe zurück
+  static double getDefaultOpacity(Color color) {
+    return isPenColor(color) ? 1.0 : 0.2;
+  }
 }
 
 /// Toolbar für Annotationen im Edit-Mode
@@ -94,12 +125,24 @@ class AnnotationToolbar extends StatelessWidget {
                         scrollDirection: Axis.horizontal,
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
-                          children: AnnotationColors.allColors.map((color) {
-                            return Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 4),
-                              child: _buildColorButton(color),
-                            );
-                          }).toList(),
+                          children: [
+                            // Pen colors (black, red, blue)
+                            ...AnnotationColors.penColors.map((color) {
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 4),
+                                child: _buildColorButton(color),
+                              );
+                            }),
+                            // Gap between pen and highlighter colors
+                            const SizedBox(width: 16),
+                            // Highlighter colors
+                            ...AnnotationColors.highlighterColors.map((color) {
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 4),
+                                child: _buildColorButton(color),
+                              );
+                            }),
+                          ],
                         ),
                       ),
                     ),

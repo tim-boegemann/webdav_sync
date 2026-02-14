@@ -34,9 +34,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   bool _isAnnotationMode = false;
   bool _isEraserMode = false;
   PdfAnnotation? _currentAnnotation;
-  Color _selectedAnnotationColor = AnnotationColors.red;
-  double _annotationStrokeWidth = 3.0;
-  double _annotationOpacity = 1.0;
+  Color _selectedAnnotationColor = AnnotationColors.black; // Default: Stift (schwarz)
+  double _annotationStrokeWidth = 1.0; // Default für Stift-Farben
+  double _annotationOpacity = 1.0; // Default für Stift-Farben
   int _currentPageNumber = 1;
   int _totalPages = 1;
 
@@ -182,6 +182,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     setState(() {
       _isAnnotationMode = true;
       _isEraserMode = false; // Reset to draw mode
+      // Reset zu Standard-Stift (schwarz)
+      _selectedAnnotationColor = AnnotationColors.black;
+      _annotationStrokeWidth = AnnotationColors.getDefaultStrokeWidth(AnnotationColors.black);
+      _annotationOpacity = AnnotationColors.getDefaultOpacity(AnnotationColors.black);
       _isAppBarVisible = false;
       _isSearchDrawerOpen = false;
     });
@@ -277,6 +281,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               onColorSelected: (color) {
                 setState(() {
                   _selectedAnnotationColor = color;
+                  // Setze Standardwerte basierend auf Farbgruppe
+                  _annotationStrokeWidth = AnnotationColors.getDefaultStrokeWidth(color);
+                  _annotationOpacity = AnnotationColors.getDefaultOpacity(color);
                 });
               },
               strokeWidth: _annotationStrokeWidth,
