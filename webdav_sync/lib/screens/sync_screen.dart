@@ -35,9 +35,9 @@ class _SyncScreenState extends State<SyncScreen> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () async {
+            final nav = Navigator.of(context);
+            final provider = context.read<SyncProvider>();
             try {
-              final nav = Navigator.of(context);
-              final provider = context.read<SyncProvider>();
               // Wenn noch ein Sync läuft, breche ihn ab bevor wir zurücknavigieren
               if (provider.isLoading) {
                 provider.cancelSync();
@@ -52,7 +52,6 @@ class _SyncScreenState extends State<SyncScreen> {
             } catch (e) {
               logger.e('Fehler beim Zurücknavigieren: $e', error: e);
               if (mounted) {
-                final nav = Navigator.of(context);
                 nav.pop();
               }
             }

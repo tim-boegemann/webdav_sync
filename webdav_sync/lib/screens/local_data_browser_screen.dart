@@ -161,9 +161,9 @@ class _LocalDataBrowserScreenState extends State<LocalDataBrowserScreen> {
         // Wende Filter an basierend auf _filterType
         List<FileSystemEntity> filtered = results;
         if (_filterType == 'dirs') {
-          filtered = results.where((item) => item is Directory).toList();
+          filtered = results.whereType<Directory>().toList();
         } else if (_filterType == 'files') {
-          filtered = results.where((item) => item is File).toList();
+          filtered = results.whereType<File>().toList();
         }
 
         if (mounted) {

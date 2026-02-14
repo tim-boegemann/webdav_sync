@@ -231,6 +231,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   }
 
   /// Löscht alle Strokes der aktuellen Seite
+  // ignore: unused_element
   void _clearCurrentPage() {
     if (_currentAnnotation == null) return;
     
@@ -492,7 +493,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                   color: Colors.white,
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
+                      color: Colors.black.withValues(alpha: 0.1),
                       blurRadius: 8,
                       offset: const Offset(2, 0),
                     ),
@@ -789,6 +790,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
       // Hole die erste Seite
       final page = await document.getPage(1);
+      if (!mounted) return;
+      
       final size = MediaQuery.of(context).size;
 
       // Berechne verfügbare Höhe (minus AppBar)
@@ -802,6 +805,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       final clampedScale = scaleFactor.clamp(1.0, 20.0);
 
       // Erstelle Matrix mit Skalierung
+      // ignore: deprecated_member_use
       final matrix = Matrix4.identity()..scale(clampedScale);
 
       // Navigiere zur neuen Matrix
@@ -982,9 +986,9 @@ class _LocalDataDrawerWidgetState extends State<LocalDataDrawerWidget> {
 
         List<FileSystemEntity> filtered = results;
         if (_filterType == 'dirs') {
-          filtered = results.where((item) => item is Directory).toList();
+          filtered = results.whereType<Directory>().toList();
         } else if (_filterType == 'files') {
-          filtered = results.where((item) => item is File).toList();
+          filtered = results.whereType<File>().toList();
         }
 
         if (mounted) {
