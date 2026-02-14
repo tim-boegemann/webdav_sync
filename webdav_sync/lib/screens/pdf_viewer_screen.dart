@@ -4,6 +4,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pdfx/pdfx.dart';
 import '../theme/app_colors.dart';
 import '../models/sync_config.dart';
+import '../models/pdf_annotation.dart';
+import '../services/pdf_annotation_service.dart';
+import '../widgets/annotation_painter.dart';
+import '../widgets/annotation_toolbar.dart';
 
 class PDFViewerScreen extends StatefulWidget {
   final SyncConfig config;
@@ -25,6 +29,16 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   bool _isAppBarVisible = true; // Neue Variable für AppBar-Sichtbarkeit
   bool _isSearchDrawerOpen = false; // Neue Variable für Search Drawer Toggle
   bool _savedSearchDrawerOpen = false; // Speichert ob Suche offen war
+  
+  // Annotations-State
+  bool _isAnnotationMode = false;
+  bool _isEraserMode = false;
+  PdfAnnotation? _currentAnnotation;
+  Color _selectedAnnotationColor = AnnotationColors.red;
+  double _annotationStrokeWidth = 3.0;
+  double _annotationOpacity = 1.0;
+  int _currentPageNumber = 1;
+  int _totalPages = 1;
 
   @override
   void dispose() {
@@ -123,9 +137,180 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
     }
   }
 
+  // ========== Annotation Methods ==========
+
+  /// Lädt Annotationen für das aktuelle PDF
+  Future<void> _loadAnnotations() async {
+    if (_selectedFilePath == null) return;
+    
+    try {
+      final annotation = await PdfAnnotationService.instance
+          .getOrCreateAnnotation(_selectedFilePath!);
+      if (mounted) {
+        setState(() {
+          _currentAnnotation = annotation;
+        });
+      }
+    } catch (e) {
+      // Fehler ignorieren - keine Annotationen laden
+    }
+  }
+
+  /// Speichert die aktuellen Annotationen
+  Future<void> _saveAnnotations() async {
+    if (_currentAnnotation == null) return;
+    
+    try {
+      await PdfAnnotationService.instance.saveAnnotation(_currentAnnotation!);
+    } catch (e) {
+      // Fehler ignorieren
+    }
+  }
+
+  /// Aktiviert den Annotations-Modus
+  Future<void> _enterAnnotationMode() async {
+    // Stelle sicher, dass Annotationen geladen sind
+    if (_currentAnnotation == null && _selectedFilePath != null) {
+      await _loadAnnotations();
+    }
+    // Falls immer noch null, erstelle leere Annotation
+    if (_currentAnnotation == null && _selectedFilePath != null) {
+      final fileName = _selectedFilePath!.split(Platform.pathSeparator).last;
+      _currentAnnotation = PdfAnnotation(pdfFileName: fileName);
+    }
+    
+    setState(() {
+      _isAnnotationMode = true;
+      _isEraserMode = false; // Reset to draw mode
+      _isAppBarVisible = false;
+      _isSearchDrawerOpen = false;
+    });
+  }
+
+  /// Verlässt den Annotations-Modus und speichert
+  Future<void> _exitAnnotationMode({bool save = true}) async {
+    if (save) {
+      await _saveAnnotations();
+    }
+    if (mounted) {
+      setState(() {
+        _isAnnotationMode = false;
+        _isAppBarVisible = true;
+      });
+    }
+  }
+
+  /// Fügt einen Stroke zur aktuellen Seite hinzu
+  void _addStrokeToCurrentPage(AnnotationStroke stroke) {
+    // Falls keine Annotation existiert, erstelle eine
+    if (_currentAnnotation == null && _selectedFilePath != null) {
+      final fileName = _selectedFilePath!.split(Platform.pathSeparator).last;
+      _currentAnnotation = PdfAnnotation(pdfFileName: fileName);
+    }
+    if (_currentAnnotation == null) return;
+    
+    setState(() {
+      _currentAnnotation = _currentAnnotation!.addStrokeToPage(
+        _currentPageNumber,
+        stroke,
+      );
+    });
+  }
+
+  /// Macht den letzten Stroke rückgängig
+  void _undoLastStroke() {
+    if (_currentAnnotation == null) return;
+    
+    setState(() {
+      _currentAnnotation = _currentAnnotation!.undoStrokeOnPage(_currentPageNumber);
+    });
+  }
+
+  /// Löscht alle Strokes der aktuellen Seite
+  void _clearCurrentPage() {
+    if (_currentAnnotation == null) return;
+    
+    setState(() {
+      _currentAnnotation = _currentAnnotation!.clearPage(_currentPageNumber);
+    });
+  }
+
+  /// Löscht einen bestimmten Stroke auf der aktuellen Seite
+  void _deleteStrokeAt(int strokeIndex) {
+    if (_currentAnnotation == null) return;
+    
+    final pageAnnotation = _currentAnnotation!.getPageAnnotation(_currentPageNumber);
+    if (strokeIndex < 0 || strokeIndex >= pageAnnotation.strokes.length) return;
+    
+    setState(() {
+      final newStrokes = List<AnnotationStroke>.from(pageAnnotation.strokes);
+      newStrokes.removeAt(strokeIndex);
+      final updatedPage = pageAnnotation.copyWith(strokes: newStrokes);
+      _currentAnnotation = _currentAnnotation!.setPageAnnotation(_currentPageNumber, updatedPage);
+    });
+  }
+
+  /// Prüft ob Undo möglich ist
+  bool get _canUndo {
+    if (_currentAnnotation == null) return false;
+    return _currentAnnotation!.hasAnnotationsOnPage(_currentPageNumber);
+  }
+
+  /// Aktualisiert die aktuelle Seitennummer
+  void _onPageChanged(int pageNumber) {
+    setState(() {
+      _currentPageNumber = pageNumber;
+    });
+  }
+
 
   @override
   Widget build(BuildContext context) {
+    // Im Annotations-Modus: zeige Annotations-Toolbar statt normaler AppBar
+    if (_isAnnotationMode) {
+      return Scaffold(
+        body: Column(
+          children: [
+            // Annotations-Toolbar oben
+            AnnotationToolbar(
+              selectedColor: _selectedAnnotationColor,
+              onColorSelected: (color) {
+                setState(() {
+                  _selectedAnnotationColor = color;
+                });
+              },
+              strokeWidth: _annotationStrokeWidth,
+              onStrokeWidthChanged: (width) {
+                setState(() {
+                  _annotationStrokeWidth = width;
+                });
+              },
+              opacity: _annotationOpacity,
+              onOpacityChanged: (opacity) {
+                setState(() {
+                  _annotationOpacity = opacity;
+                });
+              },
+              isEraserMode: _isEraserMode,
+              onEraserModeChanged: (isEraser) {
+                setState(() {
+                  _isEraserMode = isEraser;
+                });
+              },
+              onCancel: () => _exitAnnotationMode(save: false),
+              onConfirm: () => _exitAnnotationMode(save: true),
+              onUndo: _undoLastStroke,
+              canUndo: _canUndo,
+            ),
+            // PDF mit Annotation-Overlay
+            Expanded(
+              child: _buildPDFViewerWithAnnotations(),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: _isAppBarVisible
           ? AppBar(
@@ -155,6 +340,19 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                 ],
               ),
               leadingWidth: 100,
+              actions: [
+                // Edit/Annotations Button
+                if (_selectedFilePath != null)
+                  IconButton(
+                    icon: Icon(
+                      _currentAnnotation?.hasAnyAnnotations == true
+                          ? Icons.edit_note
+                          : Icons.edit_outlined,
+                    ),
+                    onPressed: _enterAnnotationMode,
+                    tooltip: 'Notizen bearbeiten',
+                  ),
+              ],
             )
           : null,
       body: Stack(
@@ -196,7 +394,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
                     ),
                   ),
                 )
-              : _buildPDFViewer(_selectedFilePath!),          // Versteckter Button auf der linken Seite - obere 20% für Suche
+              : _buildPDFViewerWithOverlay(_selectedFilePath!),          // Versteckter Button auf der linken Seite - obere 20% für Suche
           Positioned(
             left: 0,
             top: 0,
@@ -309,6 +507,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         _pdfError = null;
         _selectedFilePath = null;
         _pdfController = null;
+        _currentAnnotation = null;
+        _currentPageNumber = 1;
       });
 
       // Dispose alter Controller
@@ -335,6 +535,9 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           _pdfController = newController;
           _isPdfLoading = false;
         });
+        
+        // Lade Annotationen für diese PDF
+        await _loadAnnotations();
       }
     } catch (e) {
       if (mounted) {
@@ -363,6 +566,34 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
           },
         ),
       ),
+    );
+  }
+
+  /// PDF-Viewer mit read-only Annotations-Overlay für den Normal-Modus
+  Widget _buildPDFViewerWithOverlay(String filePath) {
+    final pageAnnotation = _currentAnnotation?.getPageAnnotation(_currentPageNumber) ??
+        PageAnnotation(pageNumber: _currentPageNumber);
+    
+    // Zeige Annotationen nur wenn welche existieren
+    final hasAnnotations = pageAnnotation.strokes.isNotEmpty;
+    
+    return Stack(
+      children: [
+        _buildPDFViewer(filePath),
+        // Zeige Annotationen als Overlay (read-only)
+        if (hasAnnotations)
+          Positioned.fill(
+            child: IgnorePointer(
+              ignoring: true, // Keine Interaktion im Normal-Modus
+              child: CustomPaint(
+                painter: AnnotationPainter(
+                  strokes: pageAnnotation.strokes,
+                  currentStroke: null,
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -415,7 +646,14 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         color: Colors.white,
         child: PdfView(
           controller: _pdfController as PdfController,
-          onDocumentLoaded: (_) {},
+          onDocumentLoaded: (document) {
+            setState(() {
+              _totalPages = document.pagesCount;
+            });
+          },
+          onPageChanged: (page) {
+            _onPageChanged(page);
+          },
         ),
       );
     } else {
@@ -425,8 +663,14 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         child: PdfViewPinch(
           controller: _pdfController as PdfControllerPinch,
           onDocumentLoaded: (document) async {
+            setState(() {
+              _totalPages = document.pagesCount;
+            });
             // Automatisch auf Höhe skalieren beim Laden
             await _fitPageToHeight(document);
+          },
+          onPageChanged: (page) {
+            _onPageChanged(page);
           },
           // Zoom-Einstellungen für alle Plattformen
           minScale: 1.0,
@@ -441,6 +685,95 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         ),
       );
     }
+  }
+
+  /// PDF-Viewer mit Annotations-Overlay für den Edit-Modus
+  Widget _buildPDFViewerWithAnnotations() {
+    if (_selectedFilePath == null) {
+      return Container(color: Colors.white);
+    }
+
+    final pageAnnotation = _currentAnnotation?.getPageAnnotation(_currentPageNumber) ??
+        PageAnnotation(pageNumber: _currentPageNumber);
+
+    return Stack(
+      children: [
+        // PDF-Viewer (nicht interaktiv im Edit-Modus)
+        IgnorePointer(
+          ignoring: _isAnnotationMode,
+          child: _buildPDFViewer(_selectedFilePath!),
+        ),
+        // Annotations-Overlay
+        Positioned.fill(
+          child: AnnotationOverlay(
+            pageAnnotation: pageAnnotation,
+            isEditMode: _isAnnotationMode,
+            isEraserMode: _isEraserMode,
+            selectedColor: _selectedAnnotationColor,
+            strokeWidth: _annotationStrokeWidth,
+            opacity: _annotationOpacity,
+            onStrokeAdded: _addStrokeToCurrentPage,
+            onStrokeDeleted: _deleteStrokeAt,
+          ),
+        ),
+        // Seitenanzeige unten
+        Positioned(
+          bottom: 16,
+          left: 0,
+          right: 0,
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.black54,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(
+                'Seite $_currentPageNumber / $_totalPages',
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
+          ),
+        ),
+        // Navigation Buttons für Seitenwechsel im Edit-Modus
+        if (_isAnnotationMode) ...[
+          // Vorherige Seite
+          Positioned(
+            left: 8,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: IconButton(
+                icon: const Icon(Icons.chevron_left, size: 40, color: Colors.black54),
+                onPressed: _currentPageNumber > 1
+                    ? () {
+                        _onPageChanged(_currentPageNumber - 1);
+                        _previousPage();
+                      }
+                    : null,
+              ),
+            ),
+          ),
+          // Nächste Seite
+          Positioned(
+            right: 8,
+            top: 0,
+            bottom: 0,
+            child: Center(
+              child: IconButton(
+                icon: const Icon(Icons.chevron_right, size: 40, color: Colors.black54),
+                onPressed: _currentPageNumber < _totalPages
+                    ? () {
+                        _onPageChanged(_currentPageNumber + 1);
+                        _nextPage();
+                      }
+                    : null,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
   }
 
   Future<void> _fitPageToHeight(PdfDocument document) async {
